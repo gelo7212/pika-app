@@ -45,7 +45,13 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
     // Only get current location if we're adding a new address (not editing)
     if (widget.address == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _getCurrentLocation();
+        // Use longer delay for web platform to ensure map is fully initialized
+        final delayMs = kIsWeb ? 2000 : 1000;
+        Future.delayed(Duration(milliseconds: delayMs), () {
+          if (mounted) {
+            _getCurrentLocation();
+          }
+        });
       });
     }
   }
@@ -91,6 +97,7 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
 
       if (_isMapReady && _selectedLocation != null && mounted) {
         await _addMarker(_selectedLocation!);
+        await _moveCameraToLocation(_selectedLocation!);
       } else {
         debugPrint(
             'Map not ready after $maxRetries retries, continuing without marker');
@@ -119,6 +126,7 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
         await _addMarker(_selectedLocation!);
         await _reverseGeocode(
             cachedLocation.latitude, cachedLocation.longitude);
+        await _moveCameraToLocation(_selectedLocation!);
         return;
       }
 
@@ -131,42 +139,80 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
         }
       }
 
-      // Check location permissions
-      PermissionStatus permissionGranted = await _location.hasPermission();
-      if (permissionGranted == PermissionStatus.denied) {
-        permissionGranted = await _location.requestPermission();
-        if (permissionGranted != PermissionStatus.granted) {
-          throw Exception('Location permissions denied');
-        }
-      }
-
-      // Get current location with timeout
-      final locationData = await _location.getLocation().timeout(
-            const Duration(seconds: 30),
+      // Handle location permissions differently for web and mobile
+      if (kIsWeb) {
+        // For web, try to get location directly and handle permission errors gracefully
+        try {
+          final locationData = await _location.getLocation().timeout(
+            const Duration(seconds: 15), // Reduced timeout for web
             onTimeout: () => throw Exception('Location request timeout'),
           );
+          
+          if (locationData.latitude != null && locationData.longitude != null) {
+            final latLng =
+                MapLatLng(locationData.latitude!, locationData.longitude!);
 
-      if (locationData.latitude != null && locationData.longitude != null) {
-        final latLng =
-            MapLatLng(locationData.latitude!, locationData.longitude!);
+            setState(() {
+              _selectedLocation = latLng;
+            });
 
-        setState(() {
-          _selectedLocation = latLng;
-        });
+            // Cache the location
+            await MapCacheService.instance.cacheCurrentLocation(latLng);
 
-        // Cache the location
-        await MapCacheService.instance.cacheCurrentLocation(latLng);
-
-        await _addMarker(latLng);
-        await _reverseGeocode(latLng.latitude, latLng.longitude);
-
-        // Move camera to current location
-        if (_isMapReady) {
-          final cameraUpdate = MapService.moveToLocation(latLng, zoom: 16.0);
-          await MapService.instance.animateCamera(_mapController, cameraUpdate);
+            await _addMarker(latLng);
+            await _reverseGeocode(latLng.latitude, latLng.longitude);
+            await _moveCameraToLocation(latLng);
+          } else {
+            throw Exception('Unable to get location coordinates');
+          }
+        } catch (e) {
+          // On web, geolocation API might not be available or permission denied
+          debugPrint('Web geolocation error: $e');
+          
+          // For web, fallback to Manila, Philippines as default location for better UX
+          final defaultLocation = const MapLatLng(14.5995, 120.9842); // Manila coordinates
+          setState(() {
+            _selectedLocation = defaultLocation;
+            _locationError = 'Location access not available. Map centered on Manila. Please tap on the map to select your location.';
+          });
+          
+          await _addMarker(defaultLocation);
+          await _moveCameraToLocation(defaultLocation);
+          // Don't rethrow the error - just continue with default location
         }
       } else {
-        throw Exception('Unable to get location coordinates');
+        // For mobile, use the standard permission flow
+        PermissionStatus permissionGranted = await _location.hasPermission();
+        if (permissionGranted == PermissionStatus.denied) {
+          permissionGranted = await _location.requestPermission();
+          if (permissionGranted != PermissionStatus.granted) {
+            throw Exception('Location permissions denied');
+          }
+        }
+
+        // Get current location with timeout
+        final locationData = await _location.getLocation().timeout(
+              const Duration(seconds: 30),
+              onTimeout: () => throw Exception('Location request timeout'),
+            );
+
+        if (locationData.latitude != null && locationData.longitude != null) {
+          final latLng =
+              MapLatLng(locationData.latitude!, locationData.longitude!);
+
+          setState(() {
+            _selectedLocation = latLng;
+          });
+
+          // Cache the location
+          await MapCacheService.instance.cacheCurrentLocation(latLng);
+
+          await _addMarker(latLng);
+          await _reverseGeocode(latLng.latitude, latLng.longitude);
+          await _moveCameraToLocation(latLng);
+        } else {
+          throw Exception('Unable to get location coordinates');
+        }
       }
     } catch (e) {
       debugPrint('Location error: $e');
@@ -205,6 +251,39 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
       debugPrint('Error adding marker: $e');
       // Continue without marker - the location is still selected and stored
       debugPrint('Continuing without visual marker - location is still saved');
+    }
+  }
+
+  Future<void> _moveCameraToLocation(MapLatLng location) async {
+    // Wait for map to be ready with retry logic
+    int retries = 0;
+    const maxRetries = 10;
+    const retryDelay = Duration(milliseconds: 500);
+
+    while (!_isMapReady && retries < maxRetries && mounted) {
+      await Future.delayed(retryDelay);
+      retries++;
+      debugPrint('Waiting for map to be ready for camera movement... retry $retries/$maxRetries');
+    }
+
+    if (_isMapReady && _mapController != null && mounted) {
+      try {
+        final cameraUpdate = MapService.moveToLocation(location, zoom: 16.0);
+        await MapService.instance.animateCamera(_mapController, cameraUpdate);
+        debugPrint('Camera moved to location: ${location.latitude}, ${location.longitude}');
+      } catch (e) {
+        debugPrint('Error moving camera to location: $e');
+        // Try with moveCamera instead of animateCamera as fallback
+        try {
+          final cameraUpdate = MapService.moveToLocation(location, zoom: 16.0);
+          await MapService.instance.moveCamera(_mapController, cameraUpdate);
+          debugPrint('Camera moved (non-animated) to location: ${location.latitude}, ${location.longitude}');
+        } catch (e2) {
+          debugPrint('Error with fallback camera movement: $e2');
+        }
+      }
+    } else {
+      debugPrint('Map not ready for camera movement after $maxRetries retries');
     }
   }
 
@@ -273,19 +352,39 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
           : MapService.defaultCameraPosition,
       onMapCreated: (controller) {
         debugPrint('Map controller received in AddAddressDialog');
-        setState(() {
+        
+        // Only update state if the controller has actually changed
+        if (_mapController != controller) {
           _mapController = controller;
-          _isMapReady = MapService.instance.isControllerReady(controller);
-        });
-        debugPrint('Map created and ready: $_isMapReady');
+          final isReady = MapService.instance.isControllerReady(controller);
+          
+          if (_isMapReady != isReady) {
+            setState(() {
+              _isMapReady = isReady;
+            });
+            debugPrint('Map created and ready: $_isMapReady');
 
-        // If we already have a selected location and the map is ready, add the marker
-        if (_isMapReady && _selectedLocation != null) {
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              _addMarker(_selectedLocation!);
+            // If we already have a selected location and the map is ready, add the marker and move camera
+            if (_isMapReady && _selectedLocation != null) {
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted) {
+                  _addMarker(_selectedLocation!);
+                  _moveCameraToLocation(_selectedLocation!);
+                }
+              });
+            } else if (_isMapReady && widget.address == null) {
+              // For new addresses, try to get current location again if it hasn't been set
+              // This handles cases where location request completed before map was ready
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted && _selectedLocation == null && !_isLoadingLocation) {
+                  debugPrint('Map ready but no location set - retrying location request');
+                  _getCurrentLocation();
+                }
+              });
             }
-          });
+          }
+        } else {
+          debugPrint('Map controller unchanged, skipping state update');
         }
       },
       onMapTap: (location) async {

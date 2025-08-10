@@ -37,34 +37,6 @@
   <!-- Google Sign-In Configuration -->
   <meta name="google-signin-client_id" content="772116536818-sgvhq2nme5qdgv1smn1jdq86si033bd1.apps.googleusercontent.com">
 
-  <!-- Mapbox GL JS -->
-  <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
-  <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
-
-  <script>
-    // Set Mapbox access token for web
-    window.mapboxAccessToken = 'pk.eyJ1IjoiZ2VsbzcyMTI3IiwiYSI6ImNtZGtyNGk1aTB4N3AyanF0bDl3MXE0aGkifQ.81OsYbXzIFu3JO2kRCWTqA';
-    
-    // Wait for mapboxgl to be available before setting access token
-    document.addEventListener('DOMContentLoaded', function() {
-      if (typeof mapboxgl !== 'undefined') {
-        mapboxgl.accessToken = window.mapboxAccessToken;
-        console.log('Mapbox GL JS initialized successfully');
-        
-        // Add a global configuration for better asset handling
-        mapboxgl.prewarm();
-      } else {
-        console.warn('Mapbox GL JS not loaded');
-      }
-    });
-    
-    // Also set it immediately in case the library is already loaded
-    if (typeof mapboxgl !== 'undefined') {
-      mapboxgl.accessToken = window.mapboxAccessToken;
-      mapboxgl.prewarm();
-    }
-  </script>
-
   <title>Pika - ESBI Delivery</title>
   <link rel="manifest" href="manifest.json">
 

@@ -1,3 +1,4 @@
+import 'package:customer_order_app/core/models/user-profile-model.dart';
 import 'package:dio/dio.dart';
 import '../models/address_model.dart';
 import '../config/api_config.dart';
@@ -11,12 +12,13 @@ class AddressService {
   AddressService({
     required Dio dio,
     required String baseUrl,
-  }) : _dio = dio, _baseUrl = baseUrl;
+  })  : _dio = dio,
+        _baseUrl = baseUrl;
 
   Future<Map<String, String>> _getHeaders() async {
     final tokenService = serviceLocator<TokenServiceInterface>();
     final tokens = await tokenService.getStoredTokens();
-    
+
     if (tokens == null || tokens.userAccessToken.isEmpty) {
       throw Exception('No authentication token available');
     }
@@ -35,7 +37,7 @@ class AddressService {
         '$_baseUrl/addresses',
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode == 200) {
         final List<dynamic> data = response.data['data'] ?? response.data;
         return data.map((json) => Address.fromJson(json)).toList();
@@ -51,6 +53,7 @@ class AddressService {
       throw Exception('Failed to load addresses: $e');
     }
   }
+
   // get default address
   Future<Address?> getDefaultAddress() async {
     try {
@@ -59,7 +62,7 @@ class AddressService {
         '$_baseUrl/addresses/default',
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode == 200) {
         return Address.fromJson(response.data['data'] ?? response.data);
       } else {
@@ -83,7 +86,7 @@ class AddressService {
         '$_baseUrl/addresses/$id',
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode == 200) {
         return Address.fromJson(response.data['data'] ?? response.data);
       } else {
@@ -124,7 +127,7 @@ class AddressService {
         data: requestData,
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         return Address.fromJson(response.data['data'] ?? response.data);
       } else {
@@ -132,7 +135,8 @@ class AddressService {
       }
     } on DioException catch (e) {
       if (e.response?.data != null) {
-        final errorMessage = e.response?.data['message'] ?? 'Failed to create address';
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to create address';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
@@ -167,7 +171,7 @@ class AddressService {
         data: requestData,
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode == 200) {
         return Address.fromJson(response.data['data'] ?? response.data);
       } else {
@@ -175,7 +179,8 @@ class AddressService {
       }
     } on DioException catch (e) {
       if (e.response?.data != null) {
-        final errorMessage = e.response?.data['message'] ?? 'Failed to update address';
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to update address';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
@@ -192,7 +197,7 @@ class AddressService {
         '$_baseUrl/addresses/$id',
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode != 200 && response.statusCode != 204) {
         throw Exception('Failed to delete address');
       }
@@ -201,7 +206,8 @@ class AddressService {
         throw Exception('Address not found');
       }
       if (e.response?.data != null) {
-        final errorMessage = e.response?.data['message'] ?? 'Failed to delete address';
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to delete address';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
@@ -218,18 +224,44 @@ class AddressService {
         '$_baseUrl/addresses/$id/default',
         options: Options(headers: headers),
       );
-      
+
       if (response.statusCode != 200) {
         throw Exception('Failed to set default address');
       }
     } on DioException catch (e) {
       if (e.response?.data != null) {
-        final errorMessage = e.response?.data['message'] ?? 'Failed to set default address';
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to set default address';
         throw Exception(errorMessage);
       }
       throw Exception('Network error: ${e.message}');
     } catch (e) {
       throw Exception('Failed to set default address: $e');
+    }
+  }
+
+  // get user profile
+  Future<UserProfileModel> userProfile() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await _dio.get(
+        '$_baseUrl/users/my-profile',
+        options: Options(headers: headers),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to get user profile');
+      }
+      return UserProfileModel.fromJson(response.data['data'] ?? response.data);
+    } on DioException catch (e) {
+      if (e.response?.data != null) {
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to get user profile';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    } catch (e) {
+      throw Exception('Failed to get user profile: $e');
     }
   }
 }

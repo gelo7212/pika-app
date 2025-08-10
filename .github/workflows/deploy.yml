@@ -1,0 +1,99 @@
+name: CI/CD Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Choose environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+      project:
+        description: 'Project name'
+        required: true
+        default: 'pickapp_order_app'
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.5'  # This version includes Dart 3.5.4
+        channel: 'stable'
+        cache: true
+
+    - name: Verify Flutter Installation
+      run: |
+        flutter --version
+        dart --version
+
+    - name: Install Flutter Dependencies
+      run: flutter pub get
+
+    - name: Build Flutter Web App
+      run: |
+        # Build the Flutter web app
+        flutter build web --release --dart-define-from-file=configs/${{ github.event.inputs.environment }}.env
+
+    - name: Archive Flutter Web App
+      run: |
+        # Create an archive of the built Flutter web app
+        tar -czf build.tar.gz -C build/web .
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: flutter-web-build
+        path: build.tar.gz
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: flutter-web-build
+
+    - name: Set up Lightsail SSH Key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.LIGHTSAIL_KEY }}" > ~/.ssh/lightsail-key.pem
+        chmod 400 ~/.ssh/lightsail-key.pem
+
+    - name: Deploy to Lightsail
+      run: |
+        # Transfer build artifact to Lightsail instance
+        scp -i ~/.ssh/lightsail-key.pem -o StrictHostKeyChecking=no build.tar.gz ubuntu@54.254.210.214:/home/ubuntu/
+
+        # Extract build files on Lightsail and copy them to environment-specific Nginx directory
+        ssh -i ~/.ssh/lightsail-key.pem -o StrictHostKeyChecking=no ubuntu@54.254.210.214 "
+          mkdir -p ~/temp_extract
+          tar -xzvf /home/ubuntu/build.tar.gz -C ~/temp_extract
+          sudo mkdir -p /usr/share/nginx/html/${{ github.event.inputs.environment }}/${{ github.event.inputs.project }}
+          sudo cp -r ~/temp_extract/* /usr/share/nginx/html/${{ github.event.inputs.environment }}/${{ github.event.inputs.project }}
+          rm -rf ~/temp_extract
+          rm /home/ubuntu/build.tar.gz
+          sudo systemctl restart nginx
+        "
+
+    - name: Cleanup
+      run: |
+        rm build.tar.gz

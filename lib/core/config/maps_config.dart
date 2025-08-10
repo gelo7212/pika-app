@@ -7,7 +7,7 @@ class MapsConfig {
   // Replace this with your actual Mapbox Access Token
   // Get it from: https://account.mapbox.com/access-tokens/
   static const String _mapboxAccessToken =
-      'sk.eyJ1IjoiZ2VsbzcyMTI3IiwiYSI6ImNtZTVwOW1ieDA4N2QybHIxYnBwbTgwNzcifQ.DcAl0plhQ8nf3fbBgJDH-g';
+      'pk.eyJ1IjoiZ2VsbzcyMTI3IiwiYSI6ImNtZGtyNGk1aTB4N3AyanF0bDl3MXE0aGkifQ.81OsYbXzIFu3JO2kRCWTqA';
 
   static String get mapboxAccessToken {
     // This appears to be a valid token for user 'gelo72127'

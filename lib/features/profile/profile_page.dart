@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/providers/user_profile_provider.dart';
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
@@ -22,15 +24,15 @@ class ProfilePage extends StatelessWidget {
         child: Column(
           children: [
             // Profile Header
-            _buildProfileHeader(context),
-            
+            _buildProfileHeader(context, ref),
+
             const SizedBox(height: 24),
-            
+
             // Profile Options
             _buildProfileOptions(context),
-            
+
             const SizedBox(height: 24),
-            
+
             // Account Actions
             _buildAccountActions(context),
           ],
@@ -39,7 +41,9 @@ class ProfilePage extends StatelessWidget {
     );
   }
 
-  Widget _buildProfileHeader(BuildContext context) {
+  Widget _buildProfileHeader(BuildContext context, WidgetRef ref) {
+    final userProfileAsync = ref.watch(userProfileProvider);
+    
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -47,55 +51,118 @@ class ProfilePage extends StatelessWidget {
         color: Theme.of(context).primaryColor.withOpacity(0.1),
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
-        children: [
-          CircleAvatar(
-            radius: 50,
-            backgroundColor: Theme.of(context).primaryColor,
-            child: const Text(
-              'JD',
-              style: TextStyle(
-                fontSize: 32,
+      child: userProfileAsync.when(
+        data: (userProfile) => Column(
+          children: [
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: Theme.of(context).primaryColor,
+              child: Text(
+                _getInitials(_getDisplayName(userProfile.name, userProfile.email)),
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _getDisplayName(userProfile.name, userProfile.email),
+              style: const TextStyle(
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'John Doe',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'john.doe@example.com',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: Theme.of(context).primaryColor,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Text(
-              'Gold Member',
+            const SizedBox(height: 4),
+            Text(
+              userProfile.email,
               style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: Colors.grey[600],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
+        loading: () => Column(
+          children: [
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const CircularProgressIndicator(
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+          ],
+        ),
+        error: (error, stackTrace) => Column(
+          children: [
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const Icon(
+                Icons.error,
+                color: Colors.white,
+                size: 32,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Error loading profile',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Please try again',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => ref.refresh(userProfileProvider),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  String _getInitials(String name) {
+    // If name is empty, extract from email
+    String displayName = name.trim();
+    if (displayName.isEmpty) {
+      // Try to extract name from email (part before @)
+      displayName = "User"; // Fallback
+    }
+    
+    final words = displayName.trim().split(' ');
+    if (words.isEmpty) return '?';
+    if (words.length == 1) return words[0].substring(0, 1).toUpperCase();
+    return '${words[0].substring(0, 1)}${words[1].substring(0, 1)}'.toUpperCase();
+  }
+
+  String _getDisplayName(String name, String email) {
+    if (name.trim().isNotEmpty) {
+      return name.trim();
+    }
+    
+    // Extract name from email if name is empty
+    final emailParts = email.split('@');
+    if (emailParts.isNotEmpty && emailParts[0].isNotEmpty) {
+      // Capitalize first letter
+      final emailName = emailParts[0];
+      return emailName[0].toUpperCase() + emailName.substring(1);
+    }
+    
+    return 'User'; // Final fallback
   }
 
   Widget _buildProfileOptions(BuildContext context) {
@@ -166,40 +233,8 @@ class ProfilePage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Account Actions',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        
-        // Stats Cards
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                'Total Orders',
-                '0',
-                Icons.receipt_long,
-                Colors.blue,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                'Loyalty Points',
-                '0',
-                Icons.stars,
-                Colors.orange,
-              ),
-            ),
-          ],
-        ),
-        
         const SizedBox(height: 16),
-        
+
         // Action Buttons
         Card(
           child: ListTile(
@@ -209,7 +244,7 @@ class ProfilePage extends StatelessWidget {
             onTap: () => context.go('/support'),
           ),
         ),
-        
+
         Card(
           child: ListTile(
             leading: Icon(Icons.info_outline, color: Colors.green[600]),
@@ -218,9 +253,9 @@ class ProfilePage extends StatelessWidget {
             onTap: () => _showAboutDialog(context),
           ),
         ),
-        
+
         const SizedBox(height: 16),
-        
+
         // Logout Button
         SizedBox(
           width: double.infinity,
@@ -236,39 +271,6 @@ class ProfilePage extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 32),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
     );
   }
 
@@ -309,7 +311,8 @@ class ProfilePage extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out of your account?'),
+        content:
+            const Text('Are you sure you want to sign out of your account?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
