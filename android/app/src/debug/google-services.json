@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "772116536818",
+    "project_id": "esbi-cafe-dev",
+    "storage_bucket": "esbi-cafe-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:772116536818:android:c4e21b33f1bf4f50271f6b",
+        "android_client_info": {
+          "package_name": "com.picka.esbi"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "772116536818-0sr4m2oj7rkg1a9dmgtbobdgs0alvopj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.picka.esbi",
+            "certificate_hash": "a451f0386a9b0f50a1b9b2300e56256b9cd9751d"
+          }
+        },
+        {
+          "client_id": "772116536818-n904cepu4nh0pp6slpf30pd6bq51aa8q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDt4Euxc8YmwVtv9VvlarK84FeMimd6gJw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "772116536818-n904cepu4nh0pp6slpf30pd6bq51aa8q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

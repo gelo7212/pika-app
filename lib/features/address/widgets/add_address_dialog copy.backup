@@ -1,0 +1,1011 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:mapbox_gl/mapbox_gl.dart';
+import 'package:location/location.dart';
+import 'dart:math' as math;
+import '../../../core/models/address_model.dart';
+import '../../../core/config/maps_config.dart';
+import '../../../core/services/map_cache_service.dart';
+import '../../../core/services/map_controller_manager.dart';
+import '../../../core/services/cached_geocoding_service.dart';
+
+class AddAddressDialog extends StatefulWidget {
+  final Address? address; // null for new address, non-null for editing
+  final Function(String name, String address, String phone, double latitude,
+      double longitude) onSave;
+
+  const AddAddressDialog({
+    super.key,
+    this.address,
+    required this.onSave,
+  });
+
+  @override
+  State<AddAddressDialog> createState() => _AddAddressDialogState();
+}
+
+class _AddAddressDialogState extends State<AddAddressDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _phoneController = TextEditingController();
+
+  MapboxMapController? _mapController;
+  final Location _location = Location();
+
+  LatLng? _selectedLocation;
+  bool _isLoadingLocation = false;
+  bool _isReverseGeocoding = false;
+  String? _locationError;
+
+  // Marker for selected location - use a circle instead of symbol to avoid asset issues
+  Circle? _markerCircle;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeFields();
+
+    // Only get current location if we're adding a new address (not editing)
+    if (widget.address == null) {
+      // Delay current location request to ensure map is initialized
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Use longer delay for web platform
+        final delayMs = kIsWeb ? 2000 : 1000;
+        Future.delayed(Duration(milliseconds: delayMs), () {
+          if (mounted) {
+            _getCurrentLocation();
+          }
+        });
+      });
+    }
+  }
+
+  void _initializeFields() {
+    if (widget.address != null) {
+      _nameController.text = widget.address!.name;
+      _addressController.text = widget.address!.address;
+      _phoneController.text = widget.address!.phone;
+      _selectedLocation =
+          LatLng(widget.address!.latitude, widget.address!.longitude);
+
+      // Schedule marker addition after widget build is complete
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scheduleMarkerAddition();
+      });
+    }
+  }
+
+  void _scheduleMarkerAddition() {
+    // Try to add marker with retries if map controller isn't ready
+    Future.delayed(const Duration(milliseconds: 1000), () async {
+      int retries = 0;
+      const maxRetries = 15; // Increased retries for web
+      const retryDelay = Duration(milliseconds: 500);
+
+      while (_mapController == null && retries < maxRetries && mounted) {
+        await Future.delayed(retryDelay);
+        retries++;
+        debugPrint('Waiting for map controller, retry $retries/$maxRetries');
+      }
+
+      if (_mapController != null && _selectedLocation != null && mounted) {
+        try {
+          // Additional wait to ensure map is fully initialized
+          await Future.delayed(const Duration(milliseconds: 500));
+          await _addMarker(_selectedLocation!);
+          debugPrint('Scheduled marker added for existing address');
+        } catch (e) {
+          debugPrint('Error adding scheduled marker: $e');
+          debugPrint('Error type: ${e.runtimeType}');
+
+          // Try one more time with a longer delay
+          await Future.delayed(const Duration(milliseconds: 2000));
+          if (_mapController != null && _selectedLocation != null && mounted) {
+            try {
+              await _addMarker(_selectedLocation!);
+              debugPrint('Scheduled marker added on second attempt');
+            } catch (retryError) {
+              debugPrint(
+                  'Failed to add scheduled marker on retry: $retryError');
+            }
+          }
+        }
+      } else {
+        debugPrint(
+            'Failed to add scheduled marker: controller=${_mapController != null}, location=${_selectedLocation != null}, mounted=$mounted');
+      }
+    });
+  }
+
+  Future<void> _getCurrentLocation() async {
+    // Don't auto-locate if editing or if location already selected
+    // if (widget.address != null || _selectedLocation != null) {
+    //   debugPrint('Skipping current location - editing existing address or location already set');
+    //   return;
+    // }
+
+    setState(() {
+      _isLoadingLocation = true;
+      _locationError = null;
+    });
+
+    debugPrint('Starting current location request...');
+
+    try {
+      // Check for cached current location first
+      final cachedLocation = await MapCacheService.instance.getCachedCurrentLocation();
+      if (cachedLocation != null && widget.address == null) {
+        debugPrint('Using cached current location: ${cachedLocation.latitude}, ${cachedLocation.longitude}');
+        
+        setState(() {
+          _selectedLocation = cachedLocation;
+        });
+
+        // Move camera to cached location
+        if (_mapController != null) {
+          try {
+            await _mapController!.animateCamera(
+              CameraUpdate.newLatLngZoom(
+                cachedLocation,
+                MapsConfig.defaultZoom,
+              ),
+            );
+            await Future.delayed(MapsConfig.cameraAnimationDuration);
+            await _addMarker(cachedLocation);
+            _reverseGeocode(cachedLocation.latitude, cachedLocation.longitude);
+          } catch (e) {
+            debugPrint('Error updating map with cached location: $e');
+          }
+        }
+
+        setState(() {
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Check if location services are enabled
+      bool serviceEnabled = await _location.serviceEnabled();
+      if (!serviceEnabled) {
+        serviceEnabled = await _location.requestService();
+        if (!serviceEnabled) {
+          setState(() {
+            _locationError =
+                'Location service is disabled. Please enable location services in your device settings.';
+            _isLoadingLocation = false;
+          });
+          return;
+        }
+      }
+
+      // Check location permissions
+      PermissionStatus permissionGranted = await _location.hasPermission();
+      if (permissionGranted == PermissionStatus.denied) {
+        permissionGranted = await _location.requestPermission();
+        if (permissionGranted != PermissionStatus.granted) {
+          setState(() {
+            _locationError =
+                'Location permission is required to show your current location on the map.';
+            _isLoadingLocation = false;
+          });
+          return;
+        }
+      }
+
+      // Get current location with timeout
+      final locationData = await _location.getLocation().timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw Exception('Location request timed out'),
+          );
+
+      if (locationData.latitude != null && locationData.longitude != null) {
+        final newLocation =
+            LatLng(locationData.latitude!, locationData.longitude!);
+        debugPrint(
+            'Current location found: ${newLocation.latitude}, ${newLocation.longitude}');
+
+        // Cache the new location
+        await MapCacheService.instance.cacheCurrentLocation(newLocation);
+
+        setState(() {
+          _selectedLocation = newLocation;
+        });
+
+        // Move camera to user location
+        if (_mapController != null) {
+          try {
+            await _mapController!.animateCamera(
+              CameraUpdate.newLatLngZoom(
+                newLocation,
+                MapsConfig.defaultZoom,
+              ),
+            );
+
+            // Wait for camera animation using cached duration
+            await Future.delayed(MapsConfig.cameraAnimationDuration);
+
+            // Add marker and auto-fill address
+            print(
+                'Adding marker at current location: ${newLocation.latitude}, ${newLocation.longitude}');
+            await _addMarker(newLocation);
+            _reverseGeocode(locationData.latitude!, locationData.longitude!);
+          } catch (e) {
+            debugPrint('Error updating map camera: $e');
+            // Continue anyway, user can still manually interact with map
+          }
+        } else {
+          // If map controller is not ready yet, wait and try again with cached delays
+          Future.delayed(MapsConfig.cameraAnimationDuration, () async {
+            if (_mapController != null && mounted) {
+              try {
+                // For web, ensure map is fully ready before operations
+                if (kIsWeb) {
+                  // Additional wait and readiness check for web
+                  await Future.delayed(const Duration(milliseconds: 500));
+                  try {
+                    await _mapController!.getVisibleRegion();
+                  } catch (readinessError) {
+                    debugPrint('Map not ready for operations: $readinessError');
+                    return;
+                  }
+                }
+
+                await _mapController!.animateCamera(
+                  CameraUpdate.newLatLngZoom(
+                    newLocation,
+                    MapsConfig.defaultZoom,
+                  ),
+                );
+                await Future.delayed(MapsConfig.cameraAnimationDuration);
+                await _addMarker(newLocation);
+              } catch (e) {
+                debugPrint('Error updating map camera (delayed): $e');
+              }
+            }
+          });
+        }
+      } else {
+        setState(() {
+          _locationError =
+              'Unable to get your current location. Please select a location on the map.';
+        });
+      }
+    } catch (e) {
+      debugPrint('Location error: $e');
+      setState(() {
+        _locationError =
+            'Failed to get location: ${e.toString()}. Please select a location on the map manually.';
+      });
+    } finally {
+      setState(() {
+        _isLoadingLocation = false;
+      });
+    }
+  }
+
+  Future<void> _addMarker(LatLng location) async {
+    if (_mapController == null) {
+      debugPrint('Map controller not available for adding marker');
+      return;
+    }
+
+    try {
+      // Remove existing marker first
+      if (_markerCircle != null) {
+        try {
+          await _mapController!.removeCircle(_markerCircle!);
+          _markerCircle = null;
+          debugPrint('Existing marker removed');
+        } catch (e) {
+          debugPrint('Error removing existing marker: $e');
+          // Set to null anyway to avoid future issues
+          _markerCircle = null;
+        }
+      }
+
+      // Wait a moment to ensure removal is complete
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Validate location coordinates
+      final lat = location.latitude;
+      final lng = location.longitude;
+
+      if (lat.isNaN || lng.isNaN || lat.isInfinite || lng.isInfinite) {
+        debugPrint('Invalid coordinates (NaN or Infinite): lat=$lat, lng=$lng');
+        return;
+      }
+
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        debugPrint('Invalid coordinates range: lat=$lat, lng=$lng');
+        return;
+      }
+
+      // Ensure the map controller is still available and the location is valid
+      if (_mapController == null) {
+        debugPrint('Map controller became null during marker addition');
+        return;
+      }
+
+      // Double-check that we have valid coordinates before creating CircleOptions
+      if (lat == 0.0 && lng == 0.0) {
+        debugPrint('Coordinates are zero, skipping marker addition');
+        return;
+      }
+
+      debugPrint(
+          'Creating circle marker at validated coordinates: lat=$lat, lng=$lng');
+
+      // For web platform, add extra safeguards and retry logic
+
+      if (kIsWeb) {
+        int retryCount = 0;
+        const maxRetries = 3;
+
+        while (retryCount < maxRetries) {
+          try {
+            // Check if map is ready before each attempt
+            if (_mapController == null || !mounted) {
+              debugPrint(
+                  'Map controller or widget not available during retry $retryCount');
+              return;
+            }
+            _mapController!.clearCircles();
+
+            // Wait progressively longer for each retry
+            if (retryCount > 0) {
+              await Future.delayed(Duration(milliseconds: 500 * retryCount));
+            }
+
+            // Try to query map state to ensure it's ready
+            try {
+              await _mapController!.getVisibleRegion();
+            } catch (stateError) {
+              debugPrint(
+                  'Map not ready for queries, retry $retryCount: $stateError');
+              retryCount++;
+              continue;
+            }
+
+            // Create simplified circle options for web
+            final circleOptions = CircleOptions(
+              geometry: LatLng(lat, lng),
+              circleRadius: 8.0,
+              circleColor: '#FF0000',
+              circleOpacity: 0.9,
+            );
+
+            debugPrint(
+                'Attempting to add circle marker (web retry $retryCount)...');
+            _markerCircle = await _mapController!.addCircle(circleOptions);
+
+            if (_markerCircle != null) {
+              debugPrint(
+                  'Web marker circle added successfully at $lat, $lng on retry $retryCount');
+              return; // Success, exit retry loop
+            } else {
+              debugPrint(
+                  'Marker circle addition returned null on retry $retryCount');
+            }
+          } catch (e) {
+            debugPrint('Web marker attempt $retryCount failed: $e');
+            if (retryCount == maxRetries - 1) {
+              debugPrint(
+                  'All web marker attempts failed, continuing without marker');
+              // Don't throw, just continue without marker
+              return;
+            }
+          }
+
+          retryCount++;
+        }
+      } else {
+        // Non-web platforms - use original approach
+        final circleOptions = CircleOptions(
+          geometry: LatLng(lat, lng),
+          circleRadius: 10.0,
+          circleColor: '#FF0000',
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 3.0,
+          circleOpacity: 0.8,
+          circleStrokeOpacity: 1.0,
+        );
+
+        debugPrint('CircleOptions created, attempting to add to map...');
+        _markerCircle = await _mapController!.addCircle(circleOptions);
+
+        if (_markerCircle != null) {
+          debugPrint('Marker circle added successfully at $lat, $lng');
+        } else {
+          debugPrint('Marker circle addition returned null');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error adding marker circle: $e');
+      debugPrint('Error type: ${e.runtimeType}');
+      debugPrint('Location details: ${location.toString()}');
+      debugPrint('Map controller available: ${_mapController != null}');
+
+      // Continue without marker - the location is still selected and stored
+      debugPrint('Continuing without visual marker - location is still saved');
+    }
+  }
+
+  Future<void> _reverseGeocode(double latitude, double longitude) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isReverseGeocoding = true;
+    });
+
+    try {
+      debugPrint('Starting cached reverse geocoding for: $latitude, $longitude');
+
+      // Validate coordinates before proceeding
+      if (latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180) {
+        debugPrint(
+            'Invalid coordinates for reverse geocoding: lat=$latitude, lng=$longitude');
+        _setCoordinateFallback(latitude, longitude);
+        return;
+      }
+
+      // Use cached geocoding service
+      final address = await CachedGeocodingService.instance.reverseGeocode(
+        latitude, 
+        longitude
+      );
+
+      if (address != null && address.isNotEmpty && mounted) {
+        setState(() {
+          _addressController.text = address;
+        });
+        debugPrint('Address updated successfully with cached geocoding service');
+      } else {
+        debugPrint('No address returned from cached geocoding service');
+        if (mounted) {
+          _setCoordinateFallback(latitude, longitude);
+        }
+      }
+    } catch (e) {
+      debugPrint('Cached reverse geocoding failed: ${e.toString()}');
+      if (mounted) {
+        _setCoordinateFallback(latitude, longitude);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isReverseGeocoding = false;
+        });
+      }
+    }
+  }
+
+  void _setCoordinateFallback(double latitude, double longitude) {
+    if (mounted) {
+      setState(() {
+        // Create a more user-friendly address format
+        // Check if coordinates are in Philippines area for better context
+        if (latitude >= 4.0 &&
+            latitude <= 21.0 &&
+            longitude >= 116.0 &&
+            longitude <= 127.0) {
+          _addressController.text =
+              'Address near ${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)} (Philippines)';
+        } else {
+          _addressController.text =
+              'Location: ${latitude.toStringAsFixed(6)}, ${longitude.toStringAsFixed(6)}';
+        }
+      });
+      debugPrint('Set coordinate fallback address');
+    }
+  }
+
+  Widget _buildMapboxMap() {
+    // Get optimized map settings from config
+    final mapSettings = MapsConfig.getOptimizedMapSettings();
+    
+    // Create base map widget
+    Widget mapWidget = MapboxMap(
+      accessToken: MapsConfig.mapboxAccessToken,
+      onMapCreated: (MapboxMapController controller) async {
+        _mapController = controller;
+        
+        // Register controller with manager for potential reuse
+        final contextId = mapControllerContextId;
+        MapControllerManager.instance.registerController(contextId, controller);
+        
+        debugPrint('Map controller initialized and registered: $contextId');
+
+        // Wait longer for the map to fully initialize, especially on web
+        await Future.delayed(Duration(milliseconds: kIsWeb ? 1500 : 800));
+
+        try {
+          // For web, add additional readiness check
+          if (kIsWeb) {
+            int readinessRetries = 0;
+            const maxReadinessRetries = 5;
+
+            while (readinessRetries < maxReadinessRetries) {
+              try {
+                await controller.getVisibleRegion();
+                debugPrint(
+                    'Map readiness confirmed on attempt ${readinessRetries + 1}');
+                break;
+              } catch (e) {
+                debugPrint(
+                    'Map not ready, attempt ${readinessRetries + 1}: $e');
+                await Future.delayed(const Duration(milliseconds: 500));
+                readinessRetries++;
+              }
+            }
+          }
+
+          // If editing an address, move to that location and add marker
+          if (_selectedLocation != null) {
+            debugPrint(
+                'Initializing map for edit mode with location: ${_selectedLocation!.latitude}, ${_selectedLocation!.longitude}');
+
+            await controller.animateCamera(
+              CameraUpdate.newLatLngZoom(
+                _selectedLocation!,
+                MapsConfig.defaultZoom,
+              ),
+            );
+
+            // Wait for camera animation to complete before adding marker
+            await Future.delayed(MapsConfig.cameraAnimationDuration);
+
+            // Double check that the controller is still available
+            if (_mapController != null && mounted) {
+              try {
+                await _addMarker(_selectedLocation!);
+                debugPrint('Marker added successfully in edit mode');
+              } catch (markerError) {
+                debugPrint('Error adding marker in edit mode: $markerError');
+                debugPrint('MarkerError type: ${markerError.runtimeType}');
+                // Retry once after a longer delay
+                await Future.delayed(MapsConfig.cameraAnimationDuration);
+                if (_mapController != null && mounted) {
+                  try {
+                    await _addMarker(_selectedLocation!);
+                    debugPrint('Marker added successfully on retry');
+                  } catch (retryError) {
+                    debugPrint('Marker addition failed on retry: $retryError');
+                  }
+                }
+              }
+            } else {
+              debugPrint(
+                  'Map controller or widget not available for marker addition');
+            }
+          }
+        } catch (e) {
+          debugPrint('Error initializing map: $e');
+        }
+      },
+      initialCameraPosition: CameraPosition(
+        target: _selectedLocation ??
+            const LatLng(
+                MapsConfig.defaultLatitude, MapsConfig.defaultLongitude),
+        zoom: _selectedLocation != null ? MapsConfig.defaultZoom : 12,
+      ),
+      onMapClick: (math.Point<double> point, LatLng coordinates) async {
+        try {
+          debugPrint(
+              'Map clicked at: ${coordinates.latitude}, ${coordinates.longitude}');
+
+          setState(() {
+            _selectedLocation = coordinates;
+          });
+
+          await _addMarker(coordinates);
+          _reverseGeocode(coordinates.latitude, coordinates.longitude);
+        } catch (e) {
+          debugPrint('Error handling map click: $e');
+        }
+      },
+      // Apply optimized settings
+      styleString: mapSettings['styleString'] as String,
+      myLocationEnabled: mapSettings['myLocationEnabled'] as bool,
+      myLocationTrackingMode: mapSettings['myLocationTrackingMode'] as MyLocationTrackingMode,
+      compassEnabled: mapSettings['compassEnabled'] as bool,
+      rotateGesturesEnabled: mapSettings['rotateGesturesEnabled'] as bool,
+      scrollGesturesEnabled: mapSettings['scrollGesturesEnabled'] as bool,
+      tiltGesturesEnabled: mapSettings['tiltGesturesEnabled'] as bool,
+      zoomGesturesEnabled: mapSettings['zoomGesturesEnabled'] as bool,
+      doubleClickZoomEnabled: mapSettings['doubleClickZoomEnabled'] as bool,
+      minMaxZoomPreference: mapSettings['minMaxZoomPreference'] as MinMaxZoomPreference,
+    );
+
+    // Add myLocationRenderMode only for non-web platforms
+    if (!kIsWeb && mapSettings.containsKey('myLocationRenderMode')) {
+      mapWidget = MapboxMap(
+        accessToken: MapsConfig.mapboxAccessToken,
+        onMapCreated: (MapboxMapController controller) async {
+          _mapController = controller;
+          
+          // Register controller with manager for potential reuse
+          final contextId = mapControllerContextId;
+          MapControllerManager.instance.registerController(contextId, controller);
+          
+          debugPrint('Map controller initialized and registered: $contextId');
+
+          // Wait longer for the map to fully initialize, especially on web
+          await Future.delayed(Duration(milliseconds: kIsWeb ? 1500 : 800));
+
+          try {
+            // If editing an address, move to that location and add marker
+            if (_selectedLocation != null) {
+              debugPrint(
+                  'Initializing map for edit mode with location: ${_selectedLocation!.latitude}, ${_selectedLocation!.longitude}');
+
+              await controller.animateCamera(
+                CameraUpdate.newLatLngZoom(
+                  _selectedLocation!,
+                  MapsConfig.defaultZoom,
+                ),
+              );
+
+              // Wait for camera animation to complete before adding marker
+              await Future.delayed(MapsConfig.cameraAnimationDuration);
+
+              // Double check that the controller is still available
+              if (_mapController != null && mounted) {
+                try {
+                  await _addMarker(_selectedLocation!);
+                  debugPrint('Marker added successfully in edit mode');
+                } catch (markerError) {
+                  debugPrint('Error adding marker in edit mode: $markerError');
+                  debugPrint('MarkerError type: ${markerError.runtimeType}');
+                  // Retry once after a longer delay
+                  await Future.delayed(MapsConfig.cameraAnimationDuration);
+                  if (_mapController != null && mounted) {
+                    try {
+                      await _addMarker(_selectedLocation!);
+                      debugPrint('Marker added successfully on retry');
+                    } catch (retryError) {
+                      debugPrint(
+                          'Marker addition failed on retry: $retryError');
+                    }
+                  }
+                }
+              } else {
+                debugPrint(
+                    'Map controller or widget not available for marker addition');
+              }
+            }
+          } catch (e) {
+            debugPrint('Error initializing map: $e');
+          }
+        },
+        initialCameraPosition: CameraPosition(
+          target: _selectedLocation ??
+              const LatLng(
+                  MapsConfig.defaultLatitude, MapsConfig.defaultLongitude),
+          zoom: _selectedLocation != null ? MapsConfig.defaultZoom : 12,
+        ),
+        onMapClick: (math.Point<double> point, LatLng coordinates) async {
+          try {
+            debugPrint(
+                'Map clicked at: ${coordinates.latitude}, ${coordinates.longitude}');
+
+            setState(() {
+              _selectedLocation = coordinates;
+            });
+
+            await _addMarker(coordinates);
+            _reverseGeocode(coordinates.latitude, coordinates.longitude);
+          } catch (e) {
+            debugPrint('Error handling map click: $e');
+          }
+        },
+        // Apply optimized settings including mobile-specific ones
+        styleString: mapSettings['styleString'] as String,
+        myLocationEnabled: mapSettings['myLocationEnabled'] as bool,
+        myLocationTrackingMode: mapSettings['myLocationTrackingMode'] as MyLocationTrackingMode,
+        myLocationRenderMode: mapSettings['myLocationRenderMode'] as MyLocationRenderMode,
+        compassEnabled: mapSettings['compassEnabled'] as bool,
+        rotateGesturesEnabled: mapSettings['rotateGesturesEnabled'] as bool,
+        scrollGesturesEnabled: mapSettings['scrollGesturesEnabled'] as bool,
+        tiltGesturesEnabled: mapSettings['tiltGesturesEnabled'] as bool,
+        zoomGesturesEnabled: mapSettings['zoomGesturesEnabled'] as bool,
+        doubleClickZoomEnabled: mapSettings['doubleClickZoomEnabled'] as bool,
+        minMaxZoomPreference: mapSettings['minMaxZoomPreference'] as MinMaxZoomPreference,
+      );
+    }
+
+    return mapWidget;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
+          maxWidth: MediaQuery.of(context).size.width * 0.95,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).primaryColor.withOpacity(0.1),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.add_location,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.address == null
+                          ? 'Add New Address'
+                          : 'Edit Address',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+
+            // Content
+            Expanded(
+              child: SingleChildScrollView(
+                // Use clamping physics to prevent overscroll that interferes with map gestures
+                physics: const ClampingScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Map section
+                      Container(
+                        height: 250,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Stack(
+                            children: [
+                              _buildMapboxMap(),
+
+                              // Loading overlay
+                              if (_isLoadingLocation || _isReverseGeocoding)
+                                Container(
+                                  color: Colors.black26,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white),
+                                  ),
+                                ),
+
+                              // Location button
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: FloatingActionButton.small(
+                                  onPressed: _getCurrentLocation,
+                                  backgroundColor: Colors.white,
+                                  child: Icon(
+                                    Icons.my_location,
+                                    color: Theme.of(context).primaryColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Instructions
+                      if (_selectedLocation == null)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info,
+                                  color: Colors.blue[700], size: 20),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Tap on the map to pin your delivery location',
+                                  style: TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      if (_locationError != null)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red[200]!),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error,
+                                  color: Colors.red[700], size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _locationError!,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      const SizedBox(height: 16),
+
+                      // Form fields
+                      TextFormField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Address Name',
+                          hintText: 'e.g., Home, Office, Mom\'s Place',
+                          prefixIcon: Icon(Icons.label),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter an address name';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _addressController,
+                        decoration: const InputDecoration(
+                          labelText: 'Street Address',
+                          hintText: 'Complete address details',
+                          prefixIcon: Icon(Icons.location_on),
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter the address';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      TextFormField(
+                        controller: _phoneController,
+                        decoration: const InputDecoration(
+                          labelText: 'Contact Number',
+                          hintText: '+63 9XX XXX XXXX',
+                          prefixIcon: Icon(Icons.phone),
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.phone,
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Please enter a contact number';
+                          }
+                          // Basic phone validation
+                          final phoneRegex = RegExp(r'^(\+63|0)?[0-9]{10}$');
+                          final cleanPhone =
+                              value.replaceAll(RegExp(r'[^\d+]'), '');
+                          if (!phoneRegex.hasMatch(cleanPhone)) {
+                            return 'Please enter a valid phone number';
+                          }
+                          return null;
+                        },
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Action buttons
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: _selectedLocation == null
+                                  ? null
+                                  : _saveAddress,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Theme.of(context).primaryColor,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Save Address'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _saveAddress() {
+    if (_formKey.currentState!.validate() && _selectedLocation != null) {
+      widget.onSave(
+        _nameController.text.trim(),
+        _addressController.text.trim(),
+        _phoneController.text.trim(),
+        _selectedLocation!.latitude,
+        _selectedLocation!.longitude,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _addressController.dispose();
+    _phoneController.dispose();
+
+    // Clean up map resources
+    if (_mapController != null && _markerCircle != null) {
+      try {
+        _mapController!.removeCircle(_markerCircle!);
+      } catch (e) {
+        debugPrint('Error removing marker on dispose: $e');
+      }
+    }
+
+    // Remove controller from manager cache
+    final contextId = mapControllerContextId;
+    MapControllerManager.instance.removeController(contextId);
+
+    super.dispose();
+  }
+
+  // Extension method implementation for context ID generation
+  String get mapControllerContextId {
+    return '${runtimeType.toString()}_${hashCode}';
+  }
+}

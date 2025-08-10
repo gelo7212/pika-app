@@ -1,0 +1,142 @@
+{
+    "categories": [
+        {
+            "link": "/menu?category=coffee",
+            "name": "Coffee",
+            "image": "https://drive.google.com/uc?export=view&id=1NOqCelIeIBff64cyKKFqBDVsFSgD3qPp",
+            "color": "#8B4513"
+        },
+        {
+            "link": "/menu?category=frappe",
+            "name": "Frappe",
+            "image": "assets/images/categories/frappe.png",
+            "color": "#4A90E2"
+        },
+        {
+            "link": "/menu?category=refresher",
+            "name": "Refresher",
+            "image": "https://via.placeholder.com/128x128/7ED321/FFFFFF?text=Refresher",
+            "color": "#7ED321"
+        },
+        {
+            "link": "/menu?category=pastry",
+            "name": "Pastry",
+            "image": "assets/images/categories/pastry.png",
+            "color": "#7ED321"
+        },
+        {
+            "link": "/menu?category=non%20coffee",
+            "name": "Non Coffee",
+            "image": "https://via.placeholder.com/128x128/FF6F61/FFFFFF?text=Snack",
+            "color": "#FF6F61"
+        },
+        {
+            "link": "/menu?category=Snacks-and-Pastries",
+            "name": "Snacks and Pastries",
+            "image": "https://via.placeholder.com/128x128/FF8C00/FFFFFF?text=Specials",
+            "color": "#FF8C00"
+        }
+    ],
+    "featured_items": [
+        {
+            "name": "ESBI's Signature Coffee",
+            "size": "Medium",
+            "category": "coffee",
+            "price": 210,
+            "id": "688b6fb46c940f7cf1c8d1e9",
+            "image": "https://via.placeholder.com/300x200/8B4513/FFFFFF?text=Hot+Spanish",
+            "description": "A delicious iced coffee with a hint of Biscoff flavor"
+        },
+        {
+            "name": "Iced Biscoff Latte",
+            "size": "Medium",
+            "category": "coffee",
+            "price": 185,
+            "id": "688b6fb46c940f7cf1c8d1f1",
+            "image": "https://via.placeholder.com/300x200/8B4513/FFFFFF?text=Hot+Spanish",
+            "description": "A delicious iced coffee with a hint of Biscoff flavor"
+        },
+        {
+            "name": "Iced Spanish Latte",
+            "size": "Medium",
+            "price": 160,
+            "category": "coffee",
+            "id": "688b6fb56c940f7cf1c8d231",
+            "description": "A refreshing iced coffee"
+        },
+        {
+            "name": "Daily Caffeine - Spanish Latte",
+            "price": 120,
+            "id": "688b6fb56c940f7cf1c8d2ab",
+            "image": "",
+            "category": "coffee",
+            "description": "A delightful blend of strong espresso and milk"
+        }
+    ],
+    "special_offers": [
+        {
+            "type": "discount",
+            "id": "offer_001",
+            "name": "Buy 2 Get 1 Free",
+            "details": "Get one coffee free when you buy two coffees",
+            "properties": {
+                "value": "33%",
+                "min_quantity": 2,
+                "applicable_categories": [
+                    "coffee"
+                ],
+                "valid_until": "2025-08-31"
+            }
+        },
+        {
+            "type": "discount",
+            "id": "offer_002",
+            "name": "First Order Discount",
+            "details": "20% off on your first order",
+            "properties": {
+                "value": "20%",
+                "min_amount": 100,
+                "new_customer_only": true,
+                "valid_until": "2025-12-31"
+            }
+        }
+    ],
+    "advertisements": [
+        {
+            "type": "advertisement",
+            "id": "ad_003",
+            "name": "New App Launch",
+            "details": "Use our new app available on mobile and web",
+            "properties": {
+                "link": "/download-app",
+                "image": "",
+                "priority": 0,
+                "valid_until": "2025-12-31"
+            }
+        },
+        {
+            "type": "advertisement",
+            "id": "ad_001",
+            "name": "Special Tugma Blend",
+            "details": "Try our special Tugma Blend",
+            "properties": {
+                "link": "/seasonal-specials",
+                "image": "",
+                "priority": 1,
+                "valid_until": "2025-10-31"
+            }
+        },
+        {
+            "type": "advertisement",
+            "id": "ad_002",
+            "name": "Loyalty Program",
+            "details": "Join our loyalty program and earn points with every purchase",
+            "properties": {
+                "link": "/loyalty",
+                "image": "",
+                "priority": 2,
+                "valid_until": "2025-12-31"
+            }
+        }
+    ]
+}
