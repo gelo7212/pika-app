@@ -35,6 +35,7 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
   bool _isReverseGeocoding = false;
   String? _locationError;
   bool _isMapReady = false;
+  bool _isMarkerOperationInProgress = false;
 
   @override
   void initState() {
@@ -232,9 +233,24 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
       return;
     }
 
+    // Prevent concurrent marker operations
+    if (_isMarkerOperationInProgress) {
+      debugPrint('Marker operation already in progress, skipping');
+      return;
+    }
+
     try {
-      // Remove existing marker first (if any)
-      await MapService.instance.removeMarker(_mapController, 'address_marker');
+      _isMarkerOperationInProgress = true;
+
+      // Remove existing marker first (if any) with error handling
+      try {
+        await MapService.instance.removeMarker(_mapController, 'address_marker');
+        // Add a small delay to ensure cleanup is complete
+        await Future.delayed(const Duration(milliseconds: 150));
+      } catch (removeError) {
+        debugPrint('Non-fatal error removing existing marker: $removeError');
+        // Continue with adding new marker even if removal fails
+      }
 
       // Add new marker
       final marker = MapService.createMarker(
@@ -251,6 +267,8 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
       debugPrint('Error adding marker: $e');
       // Continue without marker - the location is still selected and stored
       debugPrint('Continuing without visual marker - location is still saved');
+    } finally {
+      _isMarkerOperationInProgress = false;
     }
   }
 
@@ -390,6 +408,12 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
       onMapTap: (location) async {
         debugPrint(
             'Map tapped at: ${location.latitude}, ${location.longitude}');
+
+        // Prevent operation if marker operation is in progress
+        if (_isMarkerOperationInProgress) {
+          debugPrint('Marker operation in progress, ignoring tap');
+          return;
+        }
 
         setState(() {
           _selectedLocation = location;
@@ -587,6 +611,17 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
 
   @override
   void dispose() {
+    // Clean up any remaining markers
+    if (_isMapReady && _mapController != null) {
+      try {
+        MapService.instance.removeMarker(_mapController, 'address_marker').catchError((error) {
+          debugPrint('Non-fatal error cleaning up marker during dispose: $error');
+        });
+      } catch (e) {
+        debugPrint('Non-fatal error during marker cleanup: $e');
+      }
+    }
+    
     _nameController.dispose();
     _addressController.dispose();
     _phoneController.dispose();

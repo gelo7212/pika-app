@@ -16,6 +16,11 @@ class MapServiceMobile implements MapServiceInterface {
   final Map<String, mapbox_mobile.PointAnnotationManager> _annotationManagers =
       {};
   final Map<String, mapbox_mobile.PointAnnotation> _annotations = {};
+
+  /// Validate if an annotation manager is still valid
+  bool _isAnnotationManagerValid(mapbox_mobile.PointAnnotationManager? manager) {
+    return manager != null;
+  }
   @override
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -180,6 +185,9 @@ class MapServiceMobile implements MapServiceInterface {
       // Remove existing marker with the same ID if it exists
       await removeMarker(mapController, marker.markerId);
 
+      // Add a small delay to ensure cleanup is complete
+      await Future.delayed(const Duration(milliseconds: 100));
+
       // Create and add a point annotation manager
       final annotationManager =
           await controller.annotations.createPointAnnotationManager();
@@ -219,6 +227,9 @@ class MapServiceMobile implements MapServiceInterface {
           'Marker with pin added successfully at: ${marker.position.latitude}, ${marker.position.longitude}');
     } catch (e) {
       debugPrint('Error adding marker on mobile: $e');
+      // Clean up partial state if creation failed
+      _annotations.remove(marker.markerId);
+      _annotationManagers.remove(marker.markerId);
       // Continue without throwing to prevent app crashes
     }
   }
@@ -237,25 +248,40 @@ class MapServiceMobile implements MapServiceInterface {
       final annotation = _annotations[markerId];
       final annotationManager = _annotationManagers[markerId];
 
-      if (annotation != null && annotationManager != null) {
-        // Delete the annotation
-        await annotationManager.delete(annotation);
+      if (annotation != null && annotationManager != null && _isAnnotationManagerValid(annotationManager)) {
+        try {
+          // First try to delete the annotation
+          await annotationManager.delete(annotation);
+          debugPrint('Annotation deleted successfully for marker: $markerId');
+        } catch (annotationError) {
+          debugPrint('Error deleting annotation for marker $markerId: $annotationError');
+          // Continue with cleanup even if annotation deletion fails
+        }
 
-        // Remove from our tracking maps
+        // Remove from our tracking maps regardless of deletion success
         _annotations.remove(markerId);
 
-        // Remove the annotation manager
-        final controller = mapController as mapbox_mobile.MapboxMap;
-        await controller.annotations.removeAnnotationManager(annotationManager);
-        _annotationManagers.remove(markerId);
+        try {
+          // Remove the annotation manager
+          final controller = mapController as mapbox_mobile.MapboxMap;
+          await controller.annotations.removeAnnotationManager(annotationManager);
+          debugPrint('Annotation manager removed successfully for marker: $markerId');
+        } catch (managerError) {
+          debugPrint('Error removing annotation manager for marker $markerId: $managerError');
+          // Continue with cleanup
+        }
 
-        debugPrint('Marker with ID $markerId removed successfully');
+        _annotationManagers.remove(markerId);
+        debugPrint('Marker with ID $markerId removed from tracking maps');
       } else {
-        debugPrint('Marker with ID $markerId not found in tracking maps');
+        debugPrint('Marker with ID $markerId not found in tracking maps (annotation: ${annotation != null}, manager: ${annotationManager != null})');
       }
     } catch (e) {
       debugPrint('Error removing marker on mobile: $e');
-      // Continue without throwing to prevent app crashes
+      // Clean up tracking maps even if removal fails to prevent memory leaks
+      _annotations.remove(markerId);
+      _annotationManagers.remove(markerId);
+      debugPrint('Cleaned up tracking maps for marker: $markerId after error');
     }
   }
 
@@ -335,6 +361,28 @@ class MapServiceMobile implements MapServiceInterface {
 
   @override
   Future<void> dispose() async {
+    try {
+      // Clean up all annotation managers and annotations
+      for (final entry in _annotationManagers.entries) {
+        try {
+          final markerId = entry.key;
+          final manager = entry.value;
+          final annotation = _annotations[markerId];
+          
+          if (annotation != null) {
+            await manager.delete(annotation);
+          }
+        } catch (e) {
+          debugPrint('Error cleaning up annotation for marker during dispose: $e');
+        }
+      }
+      
+      _annotations.clear();
+      _annotationManagers.clear();
+    } catch (e) {
+      debugPrint('Error during MapServiceMobile cleanup: $e');
+    }
+    
     _isInitialized = false;
     debugPrint('MapServiceMobile disposed');
   }
