@@ -70,7 +70,7 @@ dependencies:
   webview_flutter_web: ^0.2.2+4
   
   # Maps & Location
-  flutter_map: ^8.2.1
+  flutter_map: ^8.1.1
   latlong2: ^0.9.1
   mapbox_maps_flutter: ^2.10.0
   location: ^8.0.1
