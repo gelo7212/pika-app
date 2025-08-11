@@ -40,12 +40,49 @@
   <!-- Facebook Login Configuration -->
   <meta property="fb:app_id" content="986376486372517" />
   
-  <!-- Google Sign-In API -->
-  <script src="https://apis.google.com/js/api.js"></script>
+  <!-- Google Sign-In API - Using newer GIS library -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
-  <!-- Facebook SDK for JavaScript -->
-  <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+  <!-- Facebook SDK -->
+  <script>
+    window.fbAsyncInit = function () {
+      try {
+        FB.init({
+          appId: '986376486372517',
+          autoLogAppEvents: true,
+          xfbml: true,
+          version: 'v18.0'
+        });
+        
+        // Set flag to indicate FB is ready for Flutter
+        window.fbReady = true;
+        window.dispatchEvent(new Event('fbReady'));
+        console.log('Facebook SDK initialized successfully');
+      } catch (error) {
+        console.error('Facebook SDK initialization failed:', error);
+        // Still set the flag to prevent infinite waiting
+        window.fbReady = true;
+        window.dispatchEvent(new Event('fbReady'));
+      }
+    };
+
+    // Fallback timeout in case SDK doesn't load
+    setTimeout(function() {
+      if (!window.fbReady) {
+        console.warn('Facebook SDK timeout - setting fallback ready state');
+        window.fbReady = true;
+        window.FB = window.FB || { 
+          login: function() { 
+            throw new Error('Facebook SDK timed out during loading'); 
+          } 
+        };
+        window.dispatchEvent(new Event('fbReady'));
+      }
+    }, 10000); // 10 second timeout
+  </script>
+  <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js" 
+          onerror="console.error('Failed to load Facebook SDK script'); window.fbReady = true; window.dispatchEvent(new Event('fbReady'));">
+  </script>
 
   <title>Pika - ESBI Delivery</title>
   <link rel="manifest" href="manifest.json">
@@ -53,7 +90,7 @@
   <!-- Firebase Configuration -->
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
-    import { getAuth, GoogleAuthProvider } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
+    import { getAuth, GoogleAuthProvider, signInWithPopup } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
 
     const firebaseConfig = {
       apiKey: "AIzaSyDN9j1m8Kxw5KqVmxtA9p_q2dPMGXF_fMc",
@@ -76,45 +113,45 @@
     provider.addScope('openid');
     provider.setCustomParameters({
       'prompt': 'select_account',
-      'access_type': 'offline'
+      'access_type': 'offline',
+      'include_granted_scopes': 'true',
+      'response_type': 'code id_token', // Explicitly request ID token
     });
 
-    // Safari-specific configuration
-    if (navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome')) {
+    // Browser-specific configuration for better token handling
+    const userAgent = navigator.userAgent;
+    if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) {
+      console.log('Safari detected - applying Safari-specific Google Sign-In configuration');
       provider.setCustomParameters({
         ...provider.getCustomParameters(),
-        'redirect_uri': window.location.origin
+        'redirect_uri': window.location.origin,
+        'approval_prompt': 'force',
+        'token_type': 'bearer'
       });
+    } else if (userAgent.includes('Firefox')) {
+      console.log('Firefox detected - applying Firefox-specific configuration');
+      provider.setCustomParameters({
+        ...provider.getCustomParameters(),
+        'response_mode': 'fragment'
+      });
+    }
+      
+    // Ensure localStorage is available for Safari
+    try {
+      localStorage.setItem('test', 'test');
+      localStorage.removeItem('test');
+    } catch (e) {
+      console.warn('Safari localStorage test failed:', e);
     }
 
     window.googleProvider = provider;
 
-    // Initialize Facebook SDK
-    window.fbAsyncInit = function() {
-      FB.init({
-        appId: '986376486372517', // Replace with your actual Facebook App ID
-        cookie: true,
-        xfbml: true,
-        version: 'v18.0'
-      });
-      
-      FB.AppEvents.logPageView();
-      
-      // Set a flag to indicate FB is ready
-      window.fbReady = true;
-      
-      // Dispatch a custom event when FB is ready
-      window.dispatchEvent(new Event('fbReady'));
-    };
+    // Make Firebase Auth and provider globally available for Flutter web
+    window.firebaseAuth = auth;
+    window.firebaseSignInWithPopup = signInWithPopup;
 
-    // Fallback to ensure FB is available
-    (function(d, s, id) {
-      var js, fjs = d.getElementsByTagName(s)[0];
-      if (d.getElementById(id)) return;
-      js = d.createElement(s); js.id = id;
-      js.src = "https://connect.facebook.net/en_US/sdk.js";
-      fjs.parentNode.insertBefore(js, fjs);
-    }(document, 'script', 'facebook-jssdk'));
+    // Legacy Google Sign-In helper removed - using Firebase Auth directly
+    console.log('Firebase and Google Sign-In configuration loaded successfully');
   </script>
 </head>
 <body>

@@ -11,6 +11,12 @@ class WebUtils {
   /// Always returns true on mobile platforms (no popup restrictions)
   static bool get supportsPopups => true;
 
+  /// Always returns true on mobile platforms (Google Sign-In works well on mobile)
+  static bool get isGoogleSignInCompatible => true;
+
+  /// Returns empty string on mobile platforms (no browser-specific recommendations needed)
+  static String get authRecommendation => '';
+
   /// Always returns true on mobile platforms (no Facebook SDK needed)
   static bool get isFacebookReady => true;
 
