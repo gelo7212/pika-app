@@ -93,8 +93,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             // Invalidate auth provider to refresh state
             ref.invalidate(isLoggedInProvider);
 
-            // Navigate to home page using GoRouter
-            context.go('/home');
+            // Check for redirect parameter
+            final redirect = GoRouterState.of(context).uri.queryParameters['redirect'];
+            
+            // Navigate to intended location or home page
+            if (redirect != null && redirect.isNotEmpty) {
+              context.go(Uri.decodeComponent(redirect));
+            } else {
+              context.go('/home');
+            }
           }
         }
       }

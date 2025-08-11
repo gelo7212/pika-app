@@ -142,8 +142,17 @@ class _HomeOrderTimelineWidgetState
 
     return GestureDetector(
       onTap: () {
-        // Navigate to order tracking page
-        context.go('/order/tracking/${order.id}');
+        // Parse monitoring status and convert to OrderStatus
+        final status = deliveryStatus?.status ?? order.status;
+        MonitoringStatus monitoringStatus = parseMonitoringStatus(status);
+        OrderStatus currentOrderStatus = getOrderStatusFromMonitoring(monitoringStatus);
+        
+        // Navigate to cart if order is in cart status, otherwise go to tracking
+        if (currentOrderStatus == OrderStatus.cart) {
+          context.go('/cart');
+        } else {
+          context.go('/order/tracking/${order.id}');
+        }
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

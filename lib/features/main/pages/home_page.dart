@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/di/service_locator.dart';
 import '../../../core/interfaces/auth_interface.dart';
+import '../../../core/services/token_validation_service.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -20,6 +21,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
 
     try {
+      // Stop background token validation
+      TokenValidationService.instance.stopBackgroundValidation();
+      
       final authService = serviceLocator<AuthInterface>();
       await authService.logout();
 

@@ -50,30 +50,33 @@ class _SplashPageState extends ConsumerState<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.restaurant_menu,
-              size: 100,
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Pika - ESBI Delivery',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+    return PopScope(
+      canPop: false, // Prevent going back from splash screen
+      child: Scaffold(
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.restaurant_menu,
+                size: 100,
                 color: Theme.of(context).colorScheme.onPrimary,
-                fontWeight: FontWeight.bold,
               ),
-            ),
-            const SizedBox(height: 48),
-            CircularProgressIndicator(
-              color: Theme.of(context).colorScheme.onPrimary,
-            ),
-          ],
+              const SizedBox(height: 24),
+              Text(
+                'Pika - ESBI Delivery',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onPrimary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 48),
+              CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.onPrimary,
+              ),
+            ],
+          ),
         ),
       ),
     );

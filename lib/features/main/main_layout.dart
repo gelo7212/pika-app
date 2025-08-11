@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers/auth_provider.dart';
@@ -16,33 +17,123 @@ class MainLayout extends ConsumerWidget {
     final currentLocation = GoRouterState.of(context).matchedLocation;
     final isLoggedInAsync = ref.watch(isLoggedInProvider);
     
-    return isLoggedInAsync.when(
-      loading: () => Scaffold(
-        appBar: AppBar(
-          title: Text(_getPageTitle(currentLocation)),
-          automaticallyImplyLeading: false,
+    return PopScope(
+      canPop: false, // Always prevent default back button behavior
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        
+        // Handle back button navigation properly
+        await _handleBackNavigation(context, currentLocation);
+      },
+      child: isLoggedInAsync.when(
+        loading: () => Scaffold(
+          appBar: AppBar(
+            title: Text(_getPageTitle(currentLocation)),
+            automaticallyImplyLeading: false,
+          ),
+          body: child,
         ),
-        body: child,
-      ),
-      error: (error, stack) => Scaffold(
-        body: child, // Show content without navigation when auth check fails
-      ),
-      data: (isLoggedIn) => Scaffold(
-        appBar: isLoggedIn ? AppBar(
-          title: Text(_getPageTitle(currentLocation)),
-          automaticallyImplyLeading: false,
-          actions: [
-            IconButton(
-              onPressed: () => context.go('/profile'),
-              icon: const Icon(Icons.person),
-              tooltip: 'Profile',
-            ),
-          ],
-        ) : null, // No app bar when not logged in
-        body: child,
-        bottomNavigationBar: isLoggedIn ? _buildBottomNavigation(context, currentLocation) : null,
+        error: (error, stack) => Scaffold(
+          body: child, // Show content without navigation when auth check fails
+        ),
+        data: (isLoggedIn) => Scaffold(
+          appBar: isLoggedIn ? AppBar(
+            title: Text(_getPageTitle(currentLocation)),
+            automaticallyImplyLeading: false,
+            actions: [
+              IconButton(
+                onPressed: () => context.go('/profile'),
+                icon: const Icon(Icons.person),
+                tooltip: 'Profile',
+              ),
+            ],
+          ) : null, // No app bar when not logged in
+          body: child,
+          bottomNavigationBar: isLoggedIn ? _buildBottomNavigation(context, currentLocation) : null,
+        ),
       ),
     );
+  }
+
+  Future<void> _handleBackNavigation(BuildContext context, String currentLocation) async {
+    // Get the router to check navigation history
+    final router = GoRouter.of(context);
+    
+    // Handle back button navigation based on current location
+    switch (currentLocation) {
+      case '/home':
+        // On home page, show exit confirmation dialog
+        final shouldExit = await _showExitConfirmationDialog(context);
+        if (shouldExit) {
+          // Exit the app
+          SystemNavigator.pop();
+        }
+        break;
+      case '/menu':
+      case '/loyalty': 
+      case '/order-history':
+      case '/support':
+        // Go back to home for main navigation pages
+        context.go('/home');
+        break;
+      case '/profile':
+        // Go back to home from profile
+        context.go('/home');
+        break;
+      case '/cart':
+      case '/ai-assist':
+      case '/addresses':
+        // For standalone pages, try to go back or go to home
+        if (router.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+        break;
+      case '/product-customization':
+        // Go back to menu from product customization
+        context.go('/menu');
+        break;
+      default:
+        // For checkout, payment, and other deep pages
+        if (currentLocation.startsWith('/order/') || 
+            currentLocation.startsWith('/payment/')) {
+          // For order-related pages, try to pop or go to order history
+          if (router.canPop()) {
+            context.pop();
+          } else {
+            context.go('/order-history');
+          }
+        } else {
+          // For other pages, try to go back or go to home
+          if (router.canPop()) {
+            context.pop();
+          } else {
+            context.go('/home');
+          }
+        }
+        break;
+    }
+  }
+
+  Future<bool> _showExitConfirmationDialog(BuildContext context) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exit App'),
+        content: const Text('Are you sure you want to exit the app?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    ) ?? false;
   }
 
   String _getPageTitle(String location) {

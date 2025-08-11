@@ -1,5 +1,6 @@
 import 'package:customer_order_app/features/menu/product_customization_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +20,34 @@ import '../../features/checkout/pages/order_summary_page.dart';
 import '../../features/checkout/pages/payment_page.dart';
 import '../../features/checkout/payment_status/payment_status_page.dart';
 import '../../features/ai_assist/ai_assist_page.dart';
+import '../di/service_locator.dart';
+import '../interfaces/auth_interface.dart';
+
+// Auth guard for protected routes
+Future<bool> _requiresAuth(String location) async {
+  // Routes that don't require authentication
+  final publicRoutes = ['/', '/login'];
+  
+  if (publicRoutes.contains(location)) {
+    return false;
+  }
+  
+  // All other routes require authentication
+  return true;
+}
+
+// Check if user is authenticated with token validation
+Future<bool> _isUserAuthenticated() async {
+  try {
+    final authService = serviceLocator<AuthInterface>();
+    // Validate and refresh token if needed
+    final isValid = await authService.validateAndRefreshToken();
+    return isValid;
+  } catch (e) {
+    debugPrint('Auth validation error: $e');
+    return false;
+  }
+}
 
 // Router configuration with proper page transitions
 final routerProvider = Provider<GoRouter>((ref) {
@@ -194,18 +223,31 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
     ],
-    redirect: (context, state) {
+    redirect: (context, state) async {
       final location = state.matchedLocation;
       
-      if (kIsWeb) {
-        // Web: skip splash, go directly to home
-        if (location == '/') {
-          return '/home';
+      // Handle web initial route
+      if (kIsWeb && location == '/') {
+        return '/home';
+      }
+      
+      // Check if route requires authentication
+      final requiresAuth = await _requiresAuth(location);
+      
+      if (requiresAuth) {
+        // Check if user is authenticated with token validation
+        final isAuthenticated = await _isUserAuthenticated();
+        
+        if (!isAuthenticated) {
+          // Store intended location for redirect after login
+          if (location != '/login') {
+            return '/login?redirect=${Uri.encodeComponent(location)}';
+          }
+          return '/login';
         }
       }
       
-      // Allow all routes for now - let individual pages handle auth state
-      return null;
+      return null; // No redirect needed
     },
     errorBuilder: (context, state) => Scaffold(
       appBar: AppBar(title: const Text('Error')),
@@ -228,7 +270,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
-// Helper function to build pages with smooth transitions
+// Helper function to build pages with smooth transitions and proper back handling
 Page<dynamic> _buildPageWithTransition(
   BuildContext context,
   GoRouterState state,
@@ -236,7 +278,10 @@ Page<dynamic> _buildPageWithTransition(
 ) {
   return CustomTransitionPage<void>(
     key: state.pageKey,
-    child: child,
+    child: _BackButtonHandler(
+      currentLocation: state.matchedLocation,
+      child: child,
+    ),
     transitionDuration: const Duration(milliseconds: 350),
     reverseTransitionDuration: const Duration(milliseconds: 300),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -287,4 +332,92 @@ Page<dynamic> _buildPageWithTransition(
       );
     },
   );
+}
+
+// Widget to handle back button behavior for standalone pages
+class _BackButtonHandler extends StatelessWidget {
+  final String currentLocation;
+  final Widget child;
+
+  const _BackButtonHandler({
+    required this.currentLocation,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Only wrap standalone pages (not those in MainLayout)
+    final standalonePages = [
+      '/ai-assist',
+      '/addresses',
+      '/menu',
+      '/cart',
+      '/product-customization',
+      '/loyalty',
+      '/order-history',
+      '/support',
+      '/profile',
+    ];
+
+    final isCheckoutOrPayment = currentLocation.startsWith('/order/') || 
+                               currentLocation.startsWith('/payment/');
+
+    if (standalonePages.contains(currentLocation) || isCheckoutOrPayment) {
+      return PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop) return;
+          await _handleStandalonePageBack(context, currentLocation);
+        },
+        child: child,
+      );
+    }
+
+    return child;
+  }
+
+  Future<void> _handleStandalonePageBack(BuildContext context, String location) async {
+    final router = GoRouter.of(context);
+
+    switch (location) {
+      case '/menu':
+      case '/cart':
+      case '/loyalty':
+      case '/order-history':
+      case '/support':
+      case '/profile':
+        // Go back to home for main pages
+        context.go('/home');
+        break;
+      case '/ai-assist':
+      case '/addresses':
+        // Try to go back or go to home
+        if (router.canPop()) {
+          context.pop();
+        } else {
+          context.go('/home');
+        }
+        break;
+      case '/product-customization':
+        // Go back to menu
+        context.go('/menu');
+        break;
+      default:
+        // For checkout, payment, and other deep pages
+        if (location.startsWith('/order/') || location.startsWith('/payment/')) {
+          if (router.canPop()) {
+            context.pop();
+          } else {
+            context.go('/order-history');
+          }
+        } else {
+          if (router.canPop()) {
+            context.pop();
+          } else {
+            context.go('/home');
+          }
+        }
+        break;
+    }
+  }
 }

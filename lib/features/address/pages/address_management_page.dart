@@ -13,47 +13,60 @@ class AddressManagementPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final addressesAsync = ref.watch(addressNotifierProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Addresses'),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        surfaceTintColor: Colors.transparent,
-        foregroundColor: Colors.black,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios),
-          onPressed: () {
-            // Smart back navigation - go to profile since that's where users come from
-            if (context.canPop()) {
-              context.pop();
-            } else {
-              context.go('/profile');
-            }
-          },
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        
+        // Use the same logic as the AppBar back button
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go('/profile');
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('My Addresses'),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          foregroundColor: Colors.black,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios),
             onPressed: () {
-              ref.read(addressNotifierProvider.notifier).loadAddresses();
+              // Smart back navigation - go to profile since that's where users come from
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/profile');
+              }
             },
           ),
-        ],
-      ),
-      body: addressesAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () {
+                ref.read(addressNotifierProvider.notifier).loadAddresses();
+              },
+            ),
+          ],
         ),
-        error: (error, stackTrace) => _buildErrorState(context, ref, error),
-        data: (addresses) => _buildAddressesList(context, ref, addresses),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddAddressDialog(context, ref),
-        icon: const Icon(Icons.add_location),
-        label: const Text('Add Address'),
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.white,
+        body: addressesAsync.when(
+          loading: () => const Center(
+            child: CircularProgressIndicator(),
+          ),
+          error: (error, stackTrace) => _buildErrorState(context, ref, error),
+          data: (addresses) => _buildAddressesList(context, ref, addresses),
+        ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => _showAddAddressDialog(context, ref),
+          icon: const Icon(Icons.add_location),
+          label: const Text('Add Address'),
+          backgroundColor: Theme.of(context).primaryColor,
+          foregroundColor: Colors.white,
+        ),
       ),
     );
   }

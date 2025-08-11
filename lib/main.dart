@@ -10,6 +10,7 @@ import 'core/routing/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/map_controller_manager.dart';
 import 'core/services/maps/map_service.dart';
+import 'core/services/token_validation_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,7 @@ void main() async {
     _initializeFirebase(),
     _initializeServiceLocator(),
     _initializeMapServices(),
+    _initializeTokenValidation(),
   ]);
 
   runApp(
@@ -65,6 +67,16 @@ Future<void> _initializeMapServices() async {
     debugPrint('Map services initialized successfully');
   } catch (e) {
     debugPrint('Map services initialization error: $e');
+  }
+}
+
+Future<void> _initializeTokenValidation() async {
+  try {
+    // Start background token validation
+    TokenValidationService.instance.startBackgroundValidation();
+    debugPrint('Token validation service initialized successfully');
+  } catch (e) {
+    debugPrint('Token validation service initialization error: $e');
   }
 }
 

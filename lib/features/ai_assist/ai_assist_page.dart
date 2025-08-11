@@ -206,15 +206,23 @@ class _AIAssistPageState extends ConsumerState<AIAssistPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        
+        // Use the same navigation logic as the AppBar back button
+        context.safeGoBack();
+      },
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => context.safeGoBack(),
-        ),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black),
+            onPressed: () => context.safeGoBack(),
+          ),
         title: Row(
           children: [
             Container(
@@ -269,7 +277,8 @@ class _AIAssistPageState extends ConsumerState<AIAssistPage> {
           _buildMessageInput(),
         ],
       ),
-    );
+    ), // End of Scaffold
+  ); // End of PopScope
   }
 
   Widget _buildMessageBubble(AIMessage message) {
