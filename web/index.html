@@ -36,6 +36,16 @@
 
   <!-- Google Sign-In Configuration -->
   <meta name="google-signin-client_id" content="772116536818-sgvhq2nme5qdgv1smn1jdq86si033bd1.apps.googleusercontent.com">
+  
+  <!-- Facebook Login Configuration -->
+  <meta property="fb:app_id" content="986376486372517" />
+  
+  <!-- Google Sign-In API -->
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- Facebook SDK for JavaScript -->
+  <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
 
   <title>Pika - ESBI Delivery</title>
   <link rel="manifest" href="manifest.json">
@@ -65,10 +75,46 @@
     provider.addScope('profile');
     provider.addScope('openid');
     provider.setCustomParameters({
-      'prompt': 'select_account'
+      'prompt': 'select_account',
+      'access_type': 'offline'
     });
 
+    // Safari-specific configuration
+    if (navigator.userAgent.includes('Safari') && !navigator.userAgent.includes('Chrome')) {
+      provider.setCustomParameters({
+        ...provider.getCustomParameters(),
+        'redirect_uri': window.location.origin
+      });
+    }
+
     window.googleProvider = provider;
+
+    // Initialize Facebook SDK
+    window.fbAsyncInit = function() {
+      FB.init({
+        appId: '986376486372517', // Replace with your actual Facebook App ID
+        cookie: true,
+        xfbml: true,
+        version: 'v18.0'
+      });
+      
+      FB.AppEvents.logPageView();
+      
+      // Set a flag to indicate FB is ready
+      window.fbReady = true;
+      
+      // Dispatch a custom event when FB is ready
+      window.dispatchEvent(new Event('fbReady'));
+    };
+
+    // Fallback to ensure FB is available
+    (function(d, s, id) {
+      var js, fjs = d.getElementsByTagName(s)[0];
+      if (d.getElementById(id)) return;
+      js = d.createElement(s); js.id = id;
+      js.src = "https://connect.facebook.net/en_US/sdk.js";
+      fjs.parentNode.insertBefore(js, fjs);
+    }(document, 'script', 'facebook-jssdk'));
   </script>
 </head>
 <body>

@@ -115,14 +115,16 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
       // Check if order status is "For Refund" - if so, ignore all delivery updates
       if (_isForRefund()) {
         // For refund orders, completely ignore delivery updates and maintain refund state
-        debugPrint('Ignoring delivery update for refund order ${event.orderId}: ${event.status}');
+        debugPrint(
+            'Ignoring delivery update for refund order ${event.orderId}: ${event.status}');
         return;
       }
 
       // Only update monitoring status for non-refund orders
       setState(() {
         _currentMonitoringStatus = _parseDeliveryStatus(event.status);
-        _currentOrderStatus = getOrderStatusFromMonitoring(_currentMonitoringStatus);
+        _currentOrderStatus =
+            getOrderStatusFromMonitoring(_currentMonitoringStatus);
       });
 
       // Restart pulse animation for visual feedback
@@ -181,15 +183,19 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
         });
 
         // Check if order status is "For Refund" - if so, ignore monitoring status completely
-        if (orderDetails.status.toLowerCase() == 'for refund' || 
+        if (orderDetails.status.toLowerCase() == 'for refund' ||
             orderDetails.status.toLowerCase() == 'for_refund') {
           // For refund orders, only focus on status, ignore monitoring status
-          _currentOrderStatus = OrderStatus.canceled; // Use canceled as base state
-          _currentMonitoringStatus = MonitoringStatus.canceled; // Set to canceled but won't be used
+          _currentOrderStatus =
+              OrderStatus.canceled; // Use canceled as base state
+          _currentMonitoringStatus =
+              MonitoringStatus.canceled; // Set to canceled but won't be used
         } else {
           // For non-refund orders, use monitoring status logic
-          _currentMonitoringStatus = parseMonitoringStatus(deliveryStatus.status);
-          _currentOrderStatus = getOrderStatusFromMonitoring(_currentMonitoringStatus);
+          _currentMonitoringStatus =
+              parseMonitoringStatus(deliveryStatus.status);
+          _currentOrderStatus =
+              getOrderStatusFromMonitoring(_currentMonitoringStatus);
         }
       }
 
@@ -267,15 +273,18 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
       });
 
       // Check if order status is "For Refund" - if so, ignore monitoring status completely
-      if (orderDetails.status.toLowerCase() == 'for refund' || 
+      if (orderDetails.status.toLowerCase() == 'for refund' ||
           orderDetails.status.toLowerCase() == 'for_refund') {
         // For refund orders, only focus on status, ignore monitoring status
-        _currentOrderStatus = OrderStatus.canceled; // Use canceled as base state
-        _currentMonitoringStatus = MonitoringStatus.canceled; // Set to canceled but won't be used
+        _currentOrderStatus =
+            OrderStatus.canceled; // Use canceled as base state
+        _currentMonitoringStatus =
+            MonitoringStatus.canceled; // Set to canceled but won't be used
       } else {
         // For non-refund orders, use monitoring status logic
         _currentMonitoringStatus = parseMonitoringStatus(deliveryStatus.status);
-        _currentOrderStatus = getOrderStatusFromMonitoring(_currentMonitoringStatus);
+        _currentOrderStatus =
+            getOrderStatusFromMonitoring(_currentMonitoringStatus);
       }
 
       // Start animations after data is loaded
@@ -723,7 +732,7 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
           icon: Icons.check_circle,
         ),
         _buildRefundStepConnector(theme, isCompleted: true),
-        
+
         // Step 2: Refund Eligible
         _buildRefundStep(
           theme: theme,
@@ -735,7 +744,7 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
           icon: Icons.money_off,
         ),
         _buildRefundStepConnector(theme, isCompleted: false),
-        
+
         // Step 3: Submit Refund Request
         _buildRefundStep(
           theme: theme,
@@ -747,7 +756,7 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
           icon: Icons.description,
         ),
         _buildRefundStepConnector(theme, isCompleted: false),
-        
+
         // Step 4: Refund Processed
         _buildRefundStep(
           theme: theme,
@@ -771,10 +780,10 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
     required bool isActive,
     required IconData icon,
   }) {
-    final Color stepColor = isCompleted 
-        ? Colors.red[600]! 
-        : isActive 
-            ? Colors.red[600]! 
+    final Color stepColor = isCompleted
+        ? Colors.red[600]!
+        : isActive
+            ? Colors.red[600]!
             : Colors.grey[400]!;
 
     return Row(
@@ -798,7 +807,7 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
           ),
         ),
         const SizedBox(width: 16),
-        
+
         // Step Content
         Expanded(
           child: Column(
@@ -808,8 +817,8 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
                 title,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: isCompleted || isActive 
-                      ? stepColor 
+                  color: isCompleted || isActive
+                      ? stepColor
                       : theme.colorScheme.onSurface.withOpacity(0.6),
                 ),
               ),
@@ -829,7 +838,8 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
     );
   }
 
-  Widget _buildRefundStepConnector(ThemeData theme, {required bool isCompleted}) {
+  Widget _buildRefundStepConnector(ThemeData theme,
+      {required bool isCompleted}) {
     return Container(
       margin: const EdgeInsets.only(left: 20, top: 8, bottom: 8),
       width: 2,
@@ -860,10 +870,12 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
     IconData stepIcon;
     if (currentStep.title == 'Canceled') {
       stepIcon = Icons.cancel;
-    } else if (currentStep.title == 'Eligible for Refund' || currentStep.title == 'Refund Request') {
+    } else if (currentStep.title == 'Eligible for Refund' ||
+        currentStep.title == 'Refund Request') {
       stepIcon = currentStep.isCompleted ? Icons.money_off : Icons.access_time;
     } else {
-      stepIcon = currentStep.isCompleted ? Icons.check_circle : Icons.access_time;
+      stepIcon =
+          currentStep.isCompleted ? Icons.check_circle : Icons.access_time;
     }
 
     return Center(
@@ -1265,11 +1277,12 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
                   'Go to Cart',
                   style: theme.textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onPrimary,
                   ),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: theme.colorScheme.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: theme.colorScheme.onPrimary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1390,8 +1403,8 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
 
   // Helper methods
   bool _isForRefund() {
-    return _orderDetails?.status.toLowerCase() == 'for refund' || 
-           _orderDetails?.status.toLowerCase() == 'for_refund';
+    return _orderDetails?.status.toLowerCase() == 'for refund' ||
+        _orderDetails?.status.toLowerCase() == 'for_refund';
   }
 
   String _getStatusDescription() {
@@ -1466,12 +1479,12 @@ class _OrderTrackingPageState extends ConsumerState<OrderTrackingPage>
     if (_isForRefund()) {
       return Colors.red[600]!;
     }
-    
+
     // Use gray color for canceled orders
     if (_currentOrderStatus == OrderStatus.canceled) {
       return Colors.grey[600]!;
     }
-    
+
     // Use theme primary color for all other status indicators
     return Theme.of(context).colorScheme.primary;
   }

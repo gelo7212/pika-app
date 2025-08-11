@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Modern 2025 Color Palette - Inspired by Grab's clean design
-  static const Color _primary = Color(0xFF00C851); // Fresh green
-  static const Color _primaryDark = Color(0xFF00A644);
-  static const Color _secondary = Color(0xFF2E7D32);
-
-  // Neutral colors - clean and minimal
-  static const Color _background = Colors.white;
+  // Nature-inspired Color Palette
+  static const Color _primary = Color(0xFF2D6A4F); // Deep forest green 0xFF1B4332
+  static const Color _primaryDark = Color(0xFF2D6A4F); // Medium forest green
+  static const Color _secondary = Color(0xFF40916C); // Sage green
+  static const Color _accent = Color(0xFFB7E4C7); // Soft mint
+  
+  // Background colors
+  static const Color _background = Color(0xFFF8FDF8); // Off-white with green tint
   static const Color _surface = Colors.white;
-  static const Color _onSurface = Color(0xFF1C1B1F);
+  static const Color _surfaceVariant = Color(0xFFF5F3F0); // Warm sand
+
+  // Text colors  
+  static const Color _onSurface = Color(0xFF2B2B2B); // Dark charcoal
   static const Color _onSurfaceVariant = Color(0xFF49454F);
   static const Color _outline = Color(0xFFE5E5E5);
   static const Color _outlineVariant = Color(0xFFF5F5F5);
 
   // Text colors
-  static const Color _textPrimary = Color(0xFF1C1B1F);
+  static const Color _textPrimary = Color(0xFF2B2B2B); // Dark charcoal
   static const Color _textSecondary = Color(0xFF757575);
   static const Color _textTertiary = Color(0xFF9E9E9E);
 
   // Status colors
-  static const Color _success = Color(0xFF4CAF50);
+  static const Color _success = Color(0xFF40916C); // Use accent green for success
   static const Color _warning = Color(0xFFFF9800);
   static const Color _error = Color(0xFFF44336);
 

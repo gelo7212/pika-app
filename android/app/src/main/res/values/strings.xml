@@ -2,4 +2,9 @@
 <resources>
     <string name="app_name">Pika - ESBI Delivery</string>
     <string name="mapbox_access_token">pk.eyJ1IjoiZ2VsbzcyMTI3IiwiYSI6ImNtZGtyNGk1aTB4N3AyanF0bDl3MXE0aGkifQ.81OsYbXzIFu3JO2kRCWTqA</string>
+    
+    <!-- Facebook Configuration -->
+    <string name="facebook_app_id">986376486372517</string>
+    <string name="fb_login_protocol_scheme">fbYOUR_FACEBOOK_APP_ID</string>
+    <string name="facebook_client_token">YOUR_FACEBOOK_CLIENT_TOKEN</string>
 </resources>
