@@ -6,6 +6,7 @@ import '../../core/providers/delivery_provider.dart';
 import '../../core/providers/address_provider.dart';
 import '../../core/providers/store_provider.dart';
 import '../../core/providers/order_provider.dart';
+import '../../core/providers/user_profile_provider.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/delivery_model.dart';
 import '../../core/models/address_model.dart';
@@ -13,6 +14,7 @@ import '../../core/models/addon_model.dart';
 import '../../core/services/order_service.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/routing/navigation_extensions.dart';
 import '../../shared/components/custom_app_bar.dart';
 import '../../features/address/pages/address_management_page.dart';
 import 'product_customization_page.dart';
@@ -27,6 +29,42 @@ class CartPage extends ConsumerStatefulWidget {
 
 class _CartPageState extends ConsumerState<CartPage> {
   bool _hasShownPendingOrderModal = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-populate customer name when cart loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoPopulateCustomerName();
+    });
+  }
+
+  Future<void> _autoPopulateCustomerName() async {
+    final deliveryDetails = ref.read(deliveryProvider);
+    final deliveryNotifier = ref.read(deliveryProvider.notifier);
+
+    // Only auto-populate if customer name is empty
+    if (deliveryDetails.customerName == null ||
+        deliveryDetails.customerName!.trim().isEmpty ||
+        deliveryDetails.customerName!.trim() == 'Guest Customer') {
+      final userProfileAsync = ref.read(userProfileProvider);
+      userProfileAsync.when(
+        data: (userProfile) {
+          String autoName = '';
+          if (userProfile.name.trim().isNotEmpty) {
+            autoName = userProfile.name.trim();
+          }
+
+          // Only auto-fill if we have a real name, not a placeholder
+          if (autoName.isNotEmpty) {
+            deliveryNotifier.updateCustomerName(autoName);
+          }
+        },
+        loading: () {},
+        error: (_, __) {},
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -80,11 +118,13 @@ class _CartPageState extends ConsumerState<CartPage> {
     OrderResponse? pendingOrder,
   ) {
     // If there's a pending order, check if it's paid before loading to cart
-    if (pendingOrder != null && cartState.isEmpty && !_hasShownPendingOrderModal) {
+    if (pendingOrder != null &&
+        cartState.isEmpty &&
+        !_hasShownPendingOrderModal) {
       // Check if the order is already paid
-      final isPaid = pendingOrder.paymentMethod.isNotEmpty && 
+      final isPaid = pendingOrder.paymentMethod.isNotEmpty &&
           pendingOrder.paymentMethod.any((payment) => payment.isPaid == true);
-      
+
       // Only load to cart if the order is not paid
       if (!isPaid) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -95,9 +135,11 @@ class _CartPageState extends ConsumerState<CartPage> {
     }
 
     // If cart is empty and no pending order (or pending order is paid), show empty cart
-    if (cartState.isEmpty && (pendingOrder == null || 
-        (pendingOrder.paymentMethod.isNotEmpty && 
-         pendingOrder.paymentMethod.any((payment) => payment.isPaid == true)))) {
+    if (cartState.isEmpty &&
+        (pendingOrder == null ||
+            (pendingOrder.paymentMethod.isNotEmpty &&
+                pendingOrder.paymentMethod
+                    .any((payment) => payment.isPaid == true)))) {
       return Scaffold(
         appBar: CustomAppBar(title: 'Cart'),
         body: _buildEmptyCart(context, theme),
@@ -110,7 +152,8 @@ class _CartPageState extends ConsumerState<CartPage> {
         title: 'Cart (${cartState.totalItems})',
         actions: [
           TextButton(
-            onPressed: () => _showClearCartDialog(context, cartNotifier),
+            onPressed: () =>
+                _showClearCartDialog(context, cartNotifier, pendingOrder),
             child: Text(
               'Clear',
               style: TextStyle(color: theme.colorScheme.primary),
@@ -199,7 +242,7 @@ class _CartPageState extends ConsumerState<CartPage> {
           ),
           const SizedBox(height: 32),
           ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => context.safeGoBack(),
             style: ElevatedButton.styleFrom(
               backgroundColor: theme.colorScheme.primary,
               foregroundColor: Colors.white,
@@ -300,7 +343,8 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
   }
 
-  void _showClearCartDialog(BuildContext context, CartNotifier cartNotifier) {
+  void _showClearCartDialog(BuildContext context, CartNotifier cartNotifier,
+      OrderResponse? pendingOrder) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -309,13 +353,27 @@ class _CartPageState extends ConsumerState<CartPage> {
             'Are you sure you want to remove all items from your cart?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => context.safeGoBack(),
             child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
+              final orderService = serviceLocator<OrderService>();
+              try {
+                if (pendingOrder?.id.isNotEmpty ?? false) {
+                  await orderService.deletePendingOrder(pendingOrder!.id);
+                }
+              } catch (e) {
+                debugPrint('Error clearing pending order: $e');
+              }
+
+              Navigator.of(context)
+                  .pop(); // context.safeGoBack(); // Close dialog
               await cartNotifier.clearCart();
-              Navigator.of(context).pop();
+              final deliveryNotifier = ref.read(deliveryProvider.notifier);
+              deliveryNotifier.updateOrderComment('');
+              // Invalidate the pending order provider to refresh the UI
+              ref.invalidate(recentPendingOrderWithRefreshProvider);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Clear'),
@@ -325,174 +383,175 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
   }
 
-  Widget _buildPendingOrderPage(BuildContext context, ThemeData theme,
-      OrderResponse pendingOrder, WidgetRef ref) {
-    return Scaffold(
-      appBar: CustomAppBar(title: 'Pending Order'),
-      body: Column(
-        children: [
-          // Pending order info
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            margin: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(0.2),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.info_outline,
-                      color: theme.colorScheme.primary,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'You have a pending order',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Order #${pendingOrder.orderNo}',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${pendingOrder.items.length} items • ₱${pendingOrder.totalAmountPay.toStringAsFixed(2)}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
+  // Widget _buildPendingOrderPage(BuildContext context, ThemeData theme,
+  //     OrderResponse pendingOrder, WidgetRef ref) {
+  //   return Scaffold(
+  //     appBar: CustomAppBar(title: 'Pending Order'),
+  //     body: Column(
+  //       children: [
+  //         // Pending order info
+  //         Container(
+  //           width: double.infinity,
+  //           padding: const EdgeInsets.all(20),
+  //           margin: const EdgeInsets.all(16),
+  //           decoration: BoxDecoration(
+  //             color: theme.colorScheme.primary.withOpacity(0.1),
+  //             borderRadius: BorderRadius.circular(12),
+  //             border: Border.all(
+  //               color: theme.colorScheme.primary.withOpacity(0.2),
+  //             ),
+  //           ),
+  //           child: Column(
+  //             crossAxisAlignment: CrossAxisAlignment.start,
+  //             children: [
+  //               Row(
+  //                 children: [
+  //                   Icon(
+  //                     Icons.info_outline,
+  //                     color: theme.colorScheme.primary,
+  //                     size: 20,
+  //                   ),
+  //                   const SizedBox(width: 8),
+  //                   Text(
+  //                     'You have a pending order',
+  //                     style: theme.textTheme.titleMedium?.copyWith(
+  //                       color: theme.colorScheme.primary,
+  //                       fontWeight: FontWeight.w600,
+  //                     ),
+  //                   ),
+  //                 ],
+  //               ),
+  //               const SizedBox(height: 8),
+  //               Text(
+  //                 'Order #${pendingOrder.orderNo}',
+  //                 style: theme.textTheme.bodyLarge?.copyWith(
+  //                   fontWeight: FontWeight.w500,
+  //                 ),
+  //               ),
+  //               const SizedBox(height: 4),
+  //               Text(
+  //                 '${pendingOrder.items.length} items • ₱${pendingOrder.totalAmountPay.toStringAsFixed(2)}',
+  //                 style: theme.textTheme.bodyMedium?.copyWith(
+  //                   color: theme.textSecondary,
+  //                 ),
+  //               ),
+  //             ],
+  //           ),
+  //         ),
 
-          // Order items list
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: pendingOrder.items.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final item = pendingOrder.items[index];
-                return _buildPendingOrderItem(context, theme, item);
-              },
-            ),
-          ),
+  //         // Order items list
+  //         Expanded(
+  //           child: ListView.separated(
+  //             padding: const EdgeInsets.symmetric(horizontal: 16),
+  //             itemCount: pendingOrder.items.length,
+  //             separatorBuilder: (context, index) => const SizedBox(height: 12),
+  //             itemBuilder: (context, index) {
+  //               final item = pendingOrder.items[index];
+  //               return _buildPendingOrderItem(context, theme, item);
+  //             },
+  //           ),
+  //         ),
 
-          // Action buttons
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                top: BorderSide(color: theme.borderColor, width: 1),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
-            child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Continue to payment button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        context.go('/order/checkout/${pendingOrder.id}');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Continue to Payment',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Load to cart button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: OutlinedButton(
-                      onPressed: () => _loadPendingOrderToCart(context, ref, pendingOrder),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: theme.colorScheme.secondary),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Load to Cart',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: theme.colorScheme.secondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Add more items button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: OutlinedButton(
-                      onPressed: () {
-                        Navigator.of(context).pop(); // Go back to menu
-                      },
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: theme.colorScheme.primary),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        'Add More Items',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  //         // Action buttons
+  //         Container(
+  //           padding: const EdgeInsets.all(20),
+  //           decoration: BoxDecoration(
+  //             color: Colors.white,
+  //             border: Border(
+  //               top: BorderSide(color: theme.borderColor, width: 1),
+  //             ),
+  //             boxShadow: [
+  //               BoxShadow(
+  //                 color: Colors.black.withOpacity(0.05),
+  //                 blurRadius: 10,
+  //                 offset: const Offset(0, -2),
+  //               ),
+  //             ],
+  //           ),
+  //           child: SafeArea(
+  //             child: Column(
+  //               mainAxisSize: MainAxisSize.min,
+  //               children: [
+  //                 // Continue to payment button
+  //                 SizedBox(
+  //                   width: double.infinity,
+  //                   height: 50,
+  //                   child: ElevatedButton(
+  //                     onPressed: () {
+  //                       context.go('/order/checkout/${pendingOrder.id}');
+  //                     },
+  //                     style: ElevatedButton.styleFrom(
+  //                       backgroundColor: theme.colorScheme.primary,
+  //                       foregroundColor: Colors.white,
+  //                       elevation: 0,
+  //                       shape: RoundedRectangleBorder(
+  //                         borderRadius: BorderRadius.circular(12),
+  //                       ),
+  //                     ),
+  //                     child: Text(
+  //                       'Continue to Payment',
+  //                       style: theme.textTheme.titleMedium?.copyWith(
+  //                         color: Colors.white,
+  //                         fontWeight: FontWeight.w600,
+  //                       ),
+  //                     ),
+  //                   ),
+  //                 ),
+  //                 const SizedBox(height: 12),
+  //                 // Load to cart button
+  //                 SizedBox(
+  //                   width: double.infinity,
+  //                   height: 50,
+  //                   child: OutlinedButton(
+  //                     onPressed: () =>
+  //                         _loadPendingOrderToCart(context, ref, pendingOrder),
+  //                     style: OutlinedButton.styleFrom(
+  //                       side: BorderSide(color: theme.colorScheme.secondary),
+  //                       shape: RoundedRectangleBorder(
+  //                         borderRadius: BorderRadius.circular(12),
+  //                       ),
+  //                     ),
+  //                     child: Text(
+  //                       'Load to Cart',
+  //                       style: theme.textTheme.titleMedium?.copyWith(
+  //                         color: theme.colorScheme.secondary,
+  //                         fontWeight: FontWeight.w600,
+  //                       ),
+  //                     ),
+  //                   ),
+  //                 ),
+  //                 const SizedBox(height: 12),
+  //                 // Add more items button
+  //                 SizedBox(
+  //                   width: double.infinity,
+  //                   height: 50,
+  //                   child: OutlinedButton(
+  //                     onPressed: () {
+  //                       Navigator.of(context).pop(); // Go back to menu
+  //                     },
+  //                     style: OutlinedButton.styleFrom(
+  //                       side: BorderSide(color: theme.colorScheme.primary),
+  //                       shape: RoundedRectangleBorder(
+  //                         borderRadius: BorderRadius.circular(12),
+  //                       ),
+  //                     ),
+  //                     child: Text(
+  //                       'Add More Items',
+  //                       style: theme.textTheme.titleMedium?.copyWith(
+  //                         color: theme.colorScheme.primary,
+  //                         fontWeight: FontWeight.w600,
+  //                       ),
+  //                     ),
+  //                   ),
+  //                 ),
+  //               ],
+  //             ),
+  //           ),
+  //         ),
+  //       ],
+  //     ),
+  //   );
+  // }
 
   Widget _buildPendingOrderItem(
       BuildContext context, ThemeData theme, OrderItem item) {
@@ -578,9 +637,10 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
   }
 
-  void _showPendingOrderModal(BuildContext context, OrderResponse pendingOrder, WidgetRef ref) {
+  void _showPendingOrderModal(
+      BuildContext context, OrderResponse pendingOrder, WidgetRef ref) {
     final theme = Theme.of(context);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -623,19 +683,19 @@ class _CartPageState extends ConsumerState<CartPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => context.safeGoBack(),
             child: const Text('Cancel'),
           ),
           OutlinedButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              context.safeGoBack();
               _mergePendingOrderToCart(context, ref, pendingOrder);
             },
             child: const Text('Merge to Cart'),
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.of(context).pop();
+              context.safeGoBack();
               context.go('/order/checkout/${pendingOrder.id}');
             },
             style: ElevatedButton.styleFrom(
@@ -649,9 +709,10 @@ class _CartPageState extends ConsumerState<CartPage> {
   }
 
   // Silently load pending order to cart without user interaction
-  Future<void> _loadPendingOrderToCartSilently(WidgetRef ref, OrderResponse pendingOrder) async {
+  Future<void> _loadPendingOrderToCartSilently(
+      WidgetRef ref, OrderResponse pendingOrder) async {
     final cartNotifier = ref.read(cartProvider.notifier);
-    
+
     try {
       // Convert order items to cart items
       for (final orderItem in pendingOrder.items) {
@@ -674,7 +735,7 @@ class _CartPageState extends ConsumerState<CartPage> {
         // Convert addons to the expected format
         final addonsMap = <String, int>{};
         final addonMetadata = <Map<String, dynamic>>[];
-        
+
         for (final addon in orderItem.addons) {
           addonsMap[addon.addonId] = addon.qty;
           addonMetadata.add({
@@ -700,33 +761,34 @@ class _CartPageState extends ConsumerState<CartPage> {
   }
 
   // Update pending order when cart changes
-  Future<void> _updatePendingOrderFromCart(WidgetRef ref, OrderResponse pendingOrder) async {
+  Future<void> _updatePendingOrderFromCart(
+      WidgetRef ref, OrderResponse pendingOrder) async {
     final cartState = ref.read(cartProvider);
-    
+
     // Only update if there are items in cart
     if (cartState.items.isEmpty) return;
-    
+
     try {
       final deliveryDetails = ref.read(deliveryProvider);
       final defaultAddressAsync = ref.read(defaultAddressProvider);
-      
+
       await defaultAddressAsync.when(
         loading: () async {},
         error: (error, stack) async {},
         data: (defaultAddress) async {
           if (defaultAddress == null) return;
-          
+
           // Get the current store ID from the pending order
           final storeId = pendingOrder.storeId;
-          
+
           // Create order object from current cart
           final order = _createOrder(
-            context, ref, deliveryDetails, defaultAddress, storeId);
-          
+              context, ref, deliveryDetails, defaultAddress, storeId);
+
           // Update the pending order
           final orderService = serviceLocator<OrderService>();
           await orderService.updateCustomerOrder(pendingOrder.id, order);
-          
+
           debugPrint('Pending order updated automatically');
         },
       );
@@ -735,9 +797,10 @@ class _CartPageState extends ConsumerState<CartPage> {
     }
   }
 
-  Future<void> _mergePendingOrderToCart(BuildContext context, WidgetRef ref, OrderResponse pendingOrder) async {
+  Future<void> _mergePendingOrderToCart(
+      BuildContext context, WidgetRef ref, OrderResponse pendingOrder) async {
     final cartNotifier = ref.read(cartProvider.notifier);
-    
+
     try {
       // Show loading dialog with progress indication
       showDialog(
@@ -784,7 +847,7 @@ class _CartPageState extends ConsumerState<CartPage> {
         // Convert addons to the expected format
         final addonsMap = <String, int>{};
         final addonMetadata = <Map<String, dynamic>>[];
-        
+
         for (final addon in orderItem.addons) {
           addonsMap[addon.addonId] = addon.qty;
           addonMetadata.add({
@@ -796,15 +859,13 @@ class _CartPageState extends ConsumerState<CartPage> {
         }
 
         // Add the operation to the batch
-        addOperations.add(
-          cartNotifier.addItem(
-            product: product,
-            variant: variant,
-            quantity: orderItem.qty,
-            addons: addonsMap,
-            addonMetadata: addonMetadata,
-          )
-        );
+        addOperations.add(cartNotifier.addItem(
+          product: product,
+          variant: variant,
+          quantity: orderItem.qty,
+          addons: addonsMap,
+          addonMetadata: addonMetadata,
+        ));
       }
 
       // Execute operations in batches to prevent overwhelming the system
@@ -821,7 +882,7 @@ class _CartPageState extends ConsumerState<CartPage> {
 
       // Hide loading dialog
       if (context.mounted) {
-        Navigator.of(context).pop();
+        context.safeGoBack();
       }
 
       // Show success message
@@ -836,11 +897,10 @@ class _CartPageState extends ConsumerState<CartPage> {
 
       // Optionally, you might want to cancel the pending order here
       // or mark it as merged. For now, we'll leave it as is.
-      
     } catch (e) {
       // Hide loading dialog if it's still showing
       if (context.mounted) {
-        Navigator.of(context).pop();
+        context.safeGoBack();
       }
 
       // Show error message
@@ -855,17 +915,17 @@ class _CartPageState extends ConsumerState<CartPage> {
     }
   }
 
-  Future<void> _loadPendingOrderToCart(BuildContext context, WidgetRef ref, OrderResponse pendingOrder) async {
+  Future<void> _loadPendingOrderToCart(
+      BuildContext context, WidgetRef ref, OrderResponse pendingOrder) async {
     final cartNotifier = ref.read(cartProvider.notifier);
-    
+
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Load Order to Cart'),
         content: const Text(
-          'This will replace your current cart items with the pending order items. Continue?'
-        ),
+            'This will replace your current cart items with the pending order items. Continue?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -880,7 +940,7 @@ class _CartPageState extends ConsumerState<CartPage> {
     );
 
     if (confirmed != true) return;
-    
+
     try {
       // Show loading dialog with progress indication
       showDialog(
@@ -930,7 +990,7 @@ class _CartPageState extends ConsumerState<CartPage> {
         // Convert addons to the expected format
         final addonsMap = <String, int>{};
         final addonMetadata = <Map<String, dynamic>>[];
-        
+
         for (final addon in orderItem.addons) {
           addonsMap[addon.addonId] = addon.qty;
           addonMetadata.add({
@@ -942,15 +1002,13 @@ class _CartPageState extends ConsumerState<CartPage> {
         }
 
         // Add the operation to the batch
-        addOperations.add(
-          cartNotifier.addItem(
-            product: product,
-            variant: variant,
-            quantity: orderItem.qty,
-            addons: addonsMap,
-            addonMetadata: addonMetadata,
-          )
-        );
+        addOperations.add(cartNotifier.addItem(
+          product: product,
+          variant: variant,
+          quantity: orderItem.qty,
+          addons: addonsMap,
+          addonMetadata: addonMetadata,
+        ));
       }
 
       // Execute operations in batches to prevent overwhelming the system
@@ -967,7 +1025,7 @@ class _CartPageState extends ConsumerState<CartPage> {
 
       // Hide loading dialog
       if (context.mounted) {
-        Navigator.of(context).pop();
+        context.safeGoBack();
       }
 
       // Show success message and navigate back
@@ -978,15 +1036,14 @@ class _CartPageState extends ConsumerState<CartPage> {
             backgroundColor: Theme.of(context).colorScheme.primary,
           ),
         );
-        
+
         // Go back to cart view
-        Navigator.of(context).pop();
+        context.safeGoBack();
       }
-      
     } catch (e) {
       // Hide loading dialog if it's still showing
       if (context.mounted) {
-        Navigator.of(context).pop();
+        context.safeGoBack();
       }
 
       // Show error message
@@ -1007,6 +1064,14 @@ class _CartPageState extends ConsumerState<CartPage> {
     final defaultAddressAsync = ref.read(defaultAddressProvider);
 
     // Validate delivery details
+    if (deliveryDetails.customerName == null ||
+        deliveryDetails.customerName!.trim().isEmpty ||
+        deliveryDetails.customerName!.trim() == 'Guest Customer') {
+      _showValidationError(context,
+          'Please provide a valid customer name. The name field is required for delivery.');
+      return;
+    }
+
     if (deliveryDetails.contactNumber.isEmpty) {
       _showValidationError(context, 'Please provide a contact number');
       return;
@@ -1075,12 +1140,17 @@ class _CartPageState extends ConsumerState<CartPage> {
 
               // Hide loading dialog
               if (context.mounted) {
-                Navigator.of(context).pop();
+                context.safeGoBack();
               }
 
               // Clear cart after successful checkout
               final cartNotifier = ref.read(cartProvider.notifier);
               await cartNotifier.clearCart();
+
+// Clear delivery details including order comment for new orders
+              final deliveryNotifier = ref.read(deliveryProvider.notifier);
+              deliveryNotifier.updateOrderComment('');
+              // Add this method to your delivery provider
 
               // Navigate to order summary page with orderId
               if (context.mounted) {
@@ -1091,7 +1161,7 @@ class _CartPageState extends ConsumerState<CartPage> {
             } catch (e) {
               // Hide loading dialog
               if (context.mounted) {
-                Navigator.of(context).pop();
+                context.safeGoBack();
               }
 
               print('Error during checkout: $e');
@@ -1109,12 +1179,35 @@ Order _createOrder(BuildContext context, WidgetRef ref,
     DeliveryDetails deliveryDetails, Address address, String storeId) {
   final cartState = ref.read(cartProvider);
 
+  // Determine customer name with priority: deliveryDetails.customerName -> userProfile -> 'Guest Customer'
+  String customerName = '';
+
+  if (deliveryDetails.customerName != null &&
+      deliveryDetails.customerName!.trim().isNotEmpty) {
+    customerName = deliveryDetails.customerName!.trim();
+  }
+
+  //  respect user input dont auto-fill on checkout
+  // else {
+  //   // Try to get from user profile as fallback
+  //   final userProfileAsync = ref.read(userProfileProvider);
+  //   userProfileAsync.when(
+  //     data: (userProfile) {
+  //       if (userProfile.name.isNotEmpty) {
+  //         customerName = userProfile.name;
+  //       }
+  //     },
+  //     loading: () {},
+  //     error: (_, __) {},
+  //   );
+  // }
+
   return Order(
     storeId: storeId,
     items: cartState.items
         .map((cartItem) => OrderItem.fromCartItem(cartItem))
         .toList(),
-    customerName: deliveryDetails.customerName ?? 'Guest Customer',
+    customerName: customerName,
     orderComment: deliveryDetails.orderComment ?? '',
     deliveryInfo: OrderDeliveryInfo.fromDeliveryDetailsAndAddress(
         deliveryDetails, address),
@@ -1142,12 +1235,12 @@ void _showAddressRequiredDialog(BuildContext context, WidgetRef ref) {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => context.safeGoBack(),
           child: const Text('Cancel'),
         ),
         ElevatedButton(
           onPressed: () {
-            Navigator.of(context).pop();
+            context.safeGoBack();
             _navigateToAddressPage(context, ref);
           },
           child: const Text('Add Address'),

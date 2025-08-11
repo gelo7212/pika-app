@@ -627,6 +627,62 @@ class OrderService {
     }
   }
 
+  // delete cart
+  Future<void> deletePendingOrder(String orderId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await _dio.delete(
+        '$_baseUrl/customer/orders/$orderId',
+        data: {},
+        options: Options(headers: headers),
+      );
+
+      if (response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204) {
+      } else {
+        throw Exception('Failed to delete order: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      if (e.response?.data != null) {
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to delete order';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    } catch (e) {
+      throw Exception('Error updating order: $e');
+    }
+  }
+
+  // delete cart
+  Future<void> cancelOrder(String orderId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await _dio.patch(
+        '$_baseUrl/customer/orders/$orderId/payment/cancel',
+        data: {},
+        options: Options(headers: headers),
+      );
+
+      if (response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204) {
+      } else {
+        throw Exception('Failed to delete order: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      if (e.response?.data != null) {
+        final errorMessage =
+            e.response?.data['message'] ?? 'Failed to delete order';
+        throw Exception(errorMessage);
+      }
+      throw Exception('Network error: ${e.message}');
+    } catch (e) {
+      throw Exception('Error updating order: $e');
+    }
+  }
+
   /// Get available payment methods for a store
   Future<List<PaymentMethodOption>> getStorePaymentMethods(
       String storeId) async {

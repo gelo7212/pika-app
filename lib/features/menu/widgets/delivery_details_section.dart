@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/delivery_provider.dart';
 import '../../../core/providers/address_provider.dart';
+import '../../../core/providers/user_profile_provider.dart';
 import '../../../core/models/address_model.dart';
 import '../../../core/models/delivery_model.dart';
 import '../../../core/theme/app_theme.dart';
@@ -11,10 +12,13 @@ class DeliveryDetailsSection extends ConsumerStatefulWidget {
   const DeliveryDetailsSection({super.key});
 
   @override
-  ConsumerState<DeliveryDetailsSection> createState() => _DeliveryDetailsSectionState();
+  ConsumerState<DeliveryDetailsSection> createState() =>
+      _DeliveryDetailsSectionState();
 }
 
-class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection> {
+class _DeliveryDetailsSectionState
+    extends ConsumerState<DeliveryDetailsSection> {
+  final TextEditingController _customerNameController = TextEditingController();
   final TextEditingController _contactController = TextEditingController();
   final TextEditingController _orderCommentController = TextEditingController();
 
@@ -23,14 +27,59 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
     super.initState();
     // Initialize controllers with current values
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final deliveryDetails = ref.read(deliveryProvider);
-      _contactController.text = deliveryDetails.contactNumber;
-      _orderCommentController.text = deliveryDetails.orderComment ?? '';
+      _autoPopulateFields();
     });
+  }
+
+  Future<void> _autoPopulateFields() async {
+    final deliveryDetails = ref.read(deliveryProvider);
+    final deliveryNotifier = ref.read(deliveryProvider.notifier);
+
+    // Initialize controllers with current values
+    _customerNameController.text = deliveryDetails.customerName ?? '';
+    _contactController.text = deliveryDetails.contactNumber;
+    _orderCommentController.text = deliveryDetails.orderComment ?? '';
+
+    // Auto-populate customer name only if empty
+    if (deliveryDetails.customerName == null ||
+        deliveryDetails.customerName!.trim().isEmpty) {
+      final userProfileAsync = ref.read(userProfileProvider);
+      userProfileAsync.when(
+        data: (userProfile) {
+          String autoName = '';
+          if (userProfile.name.trim().isNotEmpty) {
+            autoName = userProfile.name.trim();
+          }
+          // Only auto-fill if we have a real name, not a placeholder
+          if (autoName.isNotEmpty) {
+            _customerNameController.text = autoName;
+            deliveryNotifier.updateCustomerName(autoName);
+          }
+        },
+        loading: () {},
+        error: (_, __) {},
+      );
+    }
+
+    // Auto-populate contact number only if empty
+    if (deliveryDetails.contactNumber.isEmpty) {
+      final defaultAddressAsync = ref.read(defaultAddressProvider);
+      defaultAddressAsync.when(
+        data: (address) {
+          if (address != null && address.phone.isNotEmpty) {
+            _contactController.text = address.phone;
+            deliveryNotifier.updateContactNumber(address.phone);
+          }
+        },
+        loading: () {},
+        error: (_, __) {},
+      );
+    }
   }
 
   @override
   void dispose() {
+    _customerNameController.dispose();
     _contactController.dispose();
     _orderCommentController.dispose();
     super.dispose();
@@ -55,75 +104,29 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
               fontWeight: FontWeight.bold,
             ),
           ),
-          
+
           const SizedBox(height: 16),
 
           // Address Section
-          _buildAddressSection(context, theme, deliveryDetails, deliveryNotifier, defaultAddressAsync),
+          _buildAddressSection(context, theme, deliveryDetails,
+              deliveryNotifier, defaultAddressAsync),
+
+          const SizedBox(height: 16),
+
+          // Customer Name Field
+          _buildCustomerNameField(context, theme, deliveryDetails,
+              deliveryNotifier),
 
           const SizedBox(height: 16),
 
           // Contact Number
-          Text(
-            'Contact Number',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _contactController,
-            keyboardType: TextInputType.phone,
-            onChanged: (value) => deliveryNotifier.updateContactNumber(value),
-            decoration: InputDecoration(
-              hintText: 'Enter contact number',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.borderColor),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.borderColor),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.colorScheme.primary),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-          ),
+          _buildContactNumberField(context, theme, deliveryDetails,
+              deliveryNotifier, defaultAddressAsync),
 
           const SizedBox(height: 16),
 
           // Order Comment
-          Text(
-            'Order Comment',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _orderCommentController,
-            maxLines: 3,
-            onChanged: (value) => deliveryNotifier.updateOrderComment(value.isEmpty ? null : value),
-            decoration: InputDecoration(
-              hintText: 'Add any special instructions...',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.borderColor),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.borderColor),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: theme.colorScheme.primary),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            ),
-          ),
+          _buildOrderCommentField(context, theme, deliveryNotifier),
         ],
       ),
     );
@@ -154,9 +157,7 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
             ),
           ],
         ),
-        
         const SizedBox(height: 8),
-
         defaultAddressAsync.when(
           loading: () => const Row(
             children: [
@@ -175,16 +176,11 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
               return _buildNoAddressRow(context, theme);
             }
 
-            // Auto-select default address and fill contact number
+            // Auto-select default address
             if (!deliveryDetails.hasAddress) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 deliveryNotifier.updateAddressId(defaultAddress.id);
                 deliveryNotifier.updateAddress(defaultAddress.address);
-                // Auto-fill contact number from address if empty
-                if (deliveryDetails.contactNumber.isEmpty && defaultAddress.phone.isNotEmpty) {
-                  deliveryNotifier.updateContactNumber(defaultAddress.phone);
-                  _contactController.text = defaultAddress.phone;
-                }
               });
             }
 
@@ -220,7 +216,8 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
     );
   }
 
-  Widget _buildAddressRow(BuildContext context, ThemeData theme, Address address) {
+  Widget _buildAddressRow(
+      BuildContext context, ThemeData theme, Address address) {
     return Row(
       children: [
         Icon(
@@ -253,11 +250,13 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
   }
 
   void _navigateToAddressPage(BuildContext context) {
-    Navigator.of(context).push(
+    Navigator.of(context)
+        .push(
       MaterialPageRoute(
         builder: (context) => const AddressManagementPage(),
       ),
-    ).then((_) {
+    )
+        .then((_) {
       // Refresh address data when returning
       ref.invalidate(defaultAddressProvider);
     });
@@ -285,6 +284,152 @@ class _DeliveryDetailsSectionState extends ConsumerState<DeliveryDetailsSection>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCustomerNameField(
+    BuildContext context,
+    ThemeData theme,
+    DeliveryDetails deliveryDetails,
+    DeliveryNotifier deliveryNotifier,
+  ) {
+    final isNameEmpty = deliveryDetails.customerName == null ||
+        deliveryDetails.customerName!.isEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Customer Name',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _customerNameController,
+          onChanged: (value) {
+            final trimmedValue = value.trim();
+            deliveryNotifier
+                .updateCustomerName(trimmedValue.isEmpty ? null : trimmedValue);
+          },
+          decoration: InputDecoration(
+            hintText: 'Enter customer name',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isNameEmpty ? Colors.red : theme.borderColor,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                color: isNameEmpty ? Colors.red : theme.borderColor,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.colorScheme.primary),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+        ),
+        if (isNameEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Name is required',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.red,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildContactNumberField(
+    BuildContext context,
+    ThemeData theme,
+    DeliveryDetails deliveryDetails,
+    DeliveryNotifier deliveryNotifier,
+    AsyncValue<Address?> defaultAddressAsync,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Contact Number',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _contactController,
+          keyboardType: TextInputType.phone,
+          onChanged: (value) => deliveryNotifier.updateContactNumber(value),
+          decoration: InputDecoration(
+            hintText: 'Enter contact number',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.colorScheme.primary),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOrderCommentField(
+    BuildContext context,
+    ThemeData theme,
+    DeliveryNotifier deliveryNotifier,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Order Comment',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _orderCommentController,
+          maxLines: 3,
+          onChanged: (value) =>
+              deliveryNotifier.updateOrderComment(value.isEmpty ? null : value),
+          decoration: InputDecoration(
+            hintText: 'Add any special instructions...',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: theme.colorScheme.primary),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+        ),
+      ],
     );
   }
 }

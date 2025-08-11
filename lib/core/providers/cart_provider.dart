@@ -332,7 +332,7 @@ class CartNotifier extends StateNotifier<CartState> {
   }
 
   // Clear entire cart
-  Future<void> clearCart() async {
+  Future<void> clearCart( ) async {
     state = state.copyWith(items: []);
     await _saveCartToStorage();
   }

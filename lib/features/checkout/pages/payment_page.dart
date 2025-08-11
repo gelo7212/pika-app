@@ -952,15 +952,17 @@ class _PaymentPageState extends ConsumerState<PaymentPage> {
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
-                        onPressed: () {
-                          print("Cancel Payment button pressed"); // Debug print
-                          Navigator.of(context).pop();
-                          // Navigate to checkout page
-                          if (context.canPop()) {
-                            context.pop();
-                          } else {
-                            context.go('/order/checkout/${widget.orderId}');
+                        onPressed: () async {
+                          try {
+                            final orderService = serviceLocator<OrderService>();
+                            await orderService.cancelOrder(widget.orderId);
+                          } catch (e) {
+                            debugPrint('Error canceling order: $e');
+                            return;
                           }
+
+                          print("Cancel Payment button pressed"); // Debug print
+                          context.go('/home');
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
@@ -996,15 +998,19 @@ class _PaymentPageState extends ConsumerState<PaymentPage> {
             child: const Text('Continue Payment'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               print("Cancel Payment button pressed"); // Debug print
+              try {
+                final orderService = serviceLocator<OrderService>();
+                await orderService.cancelOrder(widget.orderId);
+              } catch (e) {
+                debugPrint('Error canceling order: $e');
+                return;
+              }
+
               Navigator.of(dialogContext).pop();
               // Navigate to checkout page
-              if (context.canPop()) {
-                context.pop();
-              } else {
-                context.go('/order/checkout/${widget.orderId}');
-              }
+              context.go('/home');
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
