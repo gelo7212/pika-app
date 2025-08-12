@@ -361,6 +361,12 @@ class OrderService {
   })  : _dio = dio,
         _baseUrl = baseUrl;
 
+  /// Helper method to get a safe error message from DioException
+  String _getSafeErrorMessage(DioException e,
+      [String fallback = 'Unknown network error']) {
+    return e.message ?? fallback;
+  }
+
   Future<Map<String, String>> _getHeaders() async {
     final tokenService = serviceLocator<TokenServiceInterface>();
     final tokens = await tokenService.getStoredTokens();
@@ -381,7 +387,10 @@ class OrderService {
       final response = await _dio.post(
         '$_baseUrl/customer/orders',
         data: order.toJson(),
-        options: Options(headers: headers),
+        options: Options(
+            headers: headers,
+            validateStatus: (_) =>
+                true), // <- don't auto-throw on 4xx/5xx responses
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -391,18 +400,18 @@ class OrderService {
         print('Order ID from _id: ${orderData['_id']}');
         print('Order ID from id: ${orderData['id']}');
         return OrderResponse.fromJson(orderData);
+      } else if (response.statusCode == 400) {
+        // Handle specific error for bad request
+        final errorData = response.data['error'] ?? response.data;
+        final errorMessage = errorData['message'] ?? 'Bad request';
+        throw errorMessage;
       } else {
         throw Exception('Failed to create order: ${response.statusCode}');
       }
     } on DioException catch (e) {
-      if (e.response?.data != null) {
-        final errorMessage =
-            e.response?.data['message'] ?? 'Failed to create order';
-        throw Exception(errorMessage);
-      }
-      throw Exception('Network error: ${e.message}');
+      rethrow;
     } catch (e) {
-      throw Exception('Error creating order: $e');
+      rethrow; // Re-throw if it's already an Exception
     }
   }
 
@@ -427,7 +436,7 @@ class OrderService {
             e.response?.data['message'] ?? 'Failed to get order';
         throw Exception(errorMessage);
       }
-      throw Exception('Network error: ${e.message}');
+      throw Exception('Network error: ${e.message ?? 'Unknown network error'}');
     } catch (e) {
       throw Exception('Error getting order: $e');
     }
@@ -452,7 +461,7 @@ class OrderService {
             e.response?.data['message'] ?? 'Failed to get order';
         throw Exception(errorMessage);
       }
-      throw Exception('Network error: ${e.message}');
+      throw Exception('Network error: ${e.message ?? 'Unknown network error'}');
     } catch (e) {
       throw Exception('Error getting order: $e');
     }
@@ -602,7 +611,10 @@ class OrderService {
       final response = await _dio.patch(
         '$_baseUrl/customer/orders/$orderId',
         data: order.toJson(),
-        options: Options(headers: headers),
+        options: Options(
+          headers: headers,
+          validateStatus: (_) => true,
+        ),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -612,18 +624,23 @@ class OrderService {
         print('Order ID from _id: ${orderData['_id']}');
         print('Order ID from id: ${orderData['id']}');
         return OrderResponse.fromJson(orderData);
+      } else if (response.statusCode == 400) {
+        // Handle specific error for bad request
+        final errorData = response.data['error'] ?? response.data;
+        final errorMessage = errorData['message'] ?? 'Bad request';
+        throw errorMessage;
       } else {
-        throw Exception('Failed to update order: ${response.statusCode}');
+        throw 'Failed to update order: ${response.statusCode}';
       }
     } on DioException catch (e) {
       if (e.response?.data != null) {
         final errorMessage =
             e.response?.data['message'] ?? 'Failed to update order';
-        throw Exception(errorMessage);
+        throw errorMessage;
       }
-      throw Exception('Network error: ${e.message}');
+      throw Exception('Network error: ${e.toString()}');
     } catch (e) {
-      throw Exception('Error updating order: $e');
+      rethrow; // Re-throw if it's already an Exception
     }
   }
 

@@ -6,6 +6,7 @@ import '../../shared/components/custom_app_bar.dart';
 import '../../core/providers/store_provider.dart';
 import '../../core/providers/product_provider.dart';
 import '../../core/providers/cart_provider.dart';
+import '../../core/models/store_model.dart';
 import 'product_customization_page.dart';
 
 class MenuPage extends ConsumerStatefulWidget {
@@ -27,6 +28,8 @@ class _MenuPageState extends ConsumerState<MenuPage>
   late TabController _tabController;
   late ScrollController _scrollController;
   late TextEditingController _searchController;
+  late AnimationController _bottomSheetController;
+  late Animation<double> _bottomSheetAnimation;
   List<String> categories = ['All']; // Start with 'All' as default
   Map<String, GlobalKey> categoryKeys = {};
   final GlobalKey _bestSellerKey = GlobalKey();
@@ -34,6 +37,8 @@ class _MenuPageState extends ConsumerState<MenuPage>
   bool _hasHandledItemId = false; // Flag to prevent multiple modal openings
   String _searchQuery = '';
   bool _isSearching = false;
+  bool _isBottomSheetVisible = true;
+  double _lastScrollOffset = 0.0;
 
   @override
   void initState() {
@@ -41,8 +46,19 @@ class _MenuPageState extends ConsumerState<MenuPage>
     _tabController = TabController(length: categories.length, vsync: this);
     _scrollController = ScrollController();
     _searchController = TextEditingController();
+    _bottomSheetController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _bottomSheetAnimation = CurvedAnimation(
+      parent: _bottomSheetController,
+      curve: Curves.easeInOut,
+    );
     _scrollController.addListener(_onScroll);
     _searchController.addListener(_onSearchChanged);
+    
+    // Start with bottom sheet visible
+    _bottomSheetController.forward();
   }
 
   @override
@@ -50,6 +66,7 @@ class _MenuPageState extends ConsumerState<MenuPage>
     _tabController.dispose();
     _scrollController.dispose();
     _searchController.dispose();
+    _bottomSheetController.dispose();
     super.dispose();
   }
 
@@ -113,12 +130,31 @@ class _MenuPageState extends ConsumerState<MenuPage>
     }
   }
 
-  // Handle scroll events to update active tab
+  // Handle scroll events to update active tab and bottom sheet visibility
   void _onScroll() {
     if (_isScrollingToCategory) return;
 
     final scrollOffset = _scrollController.offset;
+    final scrollDelta = scrollOffset - _lastScrollOffset;
+    
+    // Handle bottom sheet visibility based on scroll direction
+    if (scrollDelta > 5 && _isBottomSheetVisible) {
+      // Scrolling down - hide bottom sheet
+      setState(() {
+        _isBottomSheetVisible = false;
+      });
+      _bottomSheetController.reverse();
+    } else if (scrollDelta < -5 && !_isBottomSheetVisible) {
+      // Scrolling up - show bottom sheet
+      setState(() {
+        _isBottomSheetVisible = true;
+      });
+      _bottomSheetController.forward();
+    }
+    
+    _lastScrollOffset = scrollOffset;
 
+    // Tab switching logic (existing code)
     // If we're at the very top, show "All"
     if (scrollOffset < 50) {
       if (_tabController.index != 0) {
@@ -259,320 +295,566 @@ class _MenuPageState extends ConsumerState<MenuPage>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final nearestStoreAsync = ref.watch(nearestStoreWithRefreshProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: CustomAppBar(
         title: 'Menu',
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Store information section
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                bottom: BorderSide(
-                  color: theme.borderColor.withOpacity(0.3),
-                  width: 1,
+          Column(
+            children: [
+              // Store information section
+              _buildStoreInfoSection(theme),
+
+              // Search Bar
+              _buildSearchBar(theme),
+
+              // Category Tabs - Hide when searching
+              if (!_isSearching) _buildCategoryTabs(theme),
+
+              // Menu Content
+              Expanded(
+                child: _buildMenuContent(),
+              ),
+            ],
+          ),
+          
+          // Animated Bottom Sheet
+          _buildAnimatedBottomSheet(theme),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStoreInfoSection(ThemeData theme) {
+    final nearestStoreAsync = ref.watch(nearestStoreWithRefreshProvider);
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          bottom: BorderSide(
+            color: theme.borderColor.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+      ),
+      child: nearestStoreAsync.when(
+        loading: () => Row(
+          children: [
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: const Color(0xFF757575),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Finding your nearest store...',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF757575),
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+        error: (error, stack) => Row(
+          children: [
+            Icon(
+              Icons.location_off,
+              size: 14,
+              color: Colors.orange[600],
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'We couldn\'t find any stores nearby',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.orange[600],
                 ),
               ),
             ),
-            child: nearestStoreAsync.when(
-              loading: () => Row(
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      color: const Color(0xFF757575),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Finding your nearest store...',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF757575),
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
+            // Refresh button
+            IconButton(
+              onPressed: () {
+                ref.read(refreshNearestStoreProvider.notifier).state++;
+              },
+              icon: Icon(
+                Icons.refresh,
+                size: 16,
+                color: theme.colorScheme.primary,
               ),
-              error: (error, stack) => Row(
-                children: [
-                  Icon(
-                    Icons.location_off,
-                    size: 14,
-                    color: Colors.orange[600],
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'We couldn\'t find any stores nearby',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.orange[600],
-                      ),
-                    ),
-                  ),
-                  // Refresh button
-                  IconButton(
-                    onPressed: () {
-                      ref.read(refreshNearestStoreProvider.notifier).state++;
-                    },
-                    icon: Icon(
-                      Icons.refresh,
-                      size: 16,
-                      color: theme.colorScheme.primary,
-                    ),
-                    tooltip: 'Refresh nearest store',
-                    padding: EdgeInsets.zero,
-                    constraints: BoxConstraints(),
-                  ),
-                ],
-              ),
-              data: (storeData) {
-                if (storeData.store != null) {
-                  return Row(
+              tooltip: 'Refresh nearest store',
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints(),
+            ),
+          ],
+        ),
+        data: (storeData) {
+          if (storeData.store != null) {
+            final store = storeData.store!;
+            final isStoreOpen = store.isCurrentlyOpen;
+            final isClosed = store.isClosed ?? false;
+            
+            return Row(
+              children: [
+                Icon(
+                  Icons.place,
+                  size: 14,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.place,
-                        size: 14,
-                        color: theme.colorScheme.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            RichText(
-                              text: TextSpan(
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: const Color(0xFF757575),
-                                ),
-                                children: [
-                                  const TextSpan(text: 'Delivering from '),
-                                  TextSpan(
-                                    text: storeData.store!.name,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                  ),
-                                ],
+                      RichText(
+                        text: TextSpan(
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF757575),
+                          ),
+                          children: (isClosed || !isStoreOpen) ? [
+                            TextSpan(
+                              text: store.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: theme.colorScheme.primary,
                               ),
                             ),
-                            if (storeData.usedCurrentLocation)
-                              Text(
+                            const TextSpan(text: ' is closed and cannot cater your order right now'),
+                          ] : [
+                            const TextSpan(text: 'Delivering from '),
+                            TextSpan(
+                              text: store.name,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          if (storeData.usedCurrentLocation && (isStoreOpen && !isClosed))
+                            Expanded(
+                              child: Text(
                                 '• Based on your current location',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: const Color(0xFF999999),
                                   fontSize: 11,
                                 ),
                               ),
-                          ],
-                        ),
-                      ),
-                      // Refresh button
-                      IconButton(
-                        onPressed: () {
-                          ref
-                              .read(refreshNearestStoreProvider.notifier)
-                              .state++;
-                        },
-                        icon: Icon(
-                          Icons.refresh,
-                          size: 16,
-                          color: theme.colorScheme.primary,
-                        ),
-                        tooltip: 'Refresh nearest store',
-                        padding: EdgeInsets.zero,
-                        constraints: BoxConstraints(),
+                            ),
+                        ],
                       ),
                     ],
-                  );
-                } else {
-                  return Row(
-                    children: [
-                      Icon(
-                        Icons.location_searching,
-                        size: 14,
-                        color: const Color(0xFF999999),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'No delivery available in your area yet',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF999999),
-                          ),
-                        ),
-                      ),
-                      // Refresh button
-                      IconButton(
-                        onPressed: () {
-                          ref
-                              .read(refreshNearestStoreProvider.notifier)
-                              .state++;
-                        },
-                        icon: Icon(
-                          Icons.refresh,
-                          size: 16,
-                          color: theme.colorScheme.primary,
-                        ),
-                        tooltip: 'Refresh nearest store',
-                        padding: EdgeInsets.zero,
-                        constraints: BoxConstraints(),
-                      ),
-                    ],
-                  );
-                }
-              },
-            ),
-          ),
-
-          // Search Bar
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: Container(
-              height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(12),
-                border: _isSearching ? Border.all(
-                  color: theme.colorScheme.primary,
-                  width: 2,
-                ) : null,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _isSearching ? Icons.search : Icons.search,
-                    color: _isSearching ? theme.colorScheme.primary : theme.textSecondary,
-                    size: 20,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search menu items...',
-                        border: InputBorder.none,
-                        hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.textSecondary,
-                        ),
-                      ),
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                  if (_isSearching)
-                    IconButton(
-                      onPressed: () {
-                        _searchController.clear();
-                      },
-                      icon: Icon(
-                        Icons.clear,
-                        size: 20,
-                        color: theme.textSecondary,
-                      ),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // Category Tabs - Hide when searching
-          if (!_isSearching)
-            Container(
-              height: 40,
-              margin: const EdgeInsets.only(bottom: 16),
-              child: TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                labelColor: theme.colorScheme.primary,
-                unselectedLabelColor: theme.textSecondary,
-                indicatorColor: theme.colorScheme.primary,
-                indicatorWeight: 2,
-                labelStyle: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
                 ),
-                unselectedLabelStyle: theme.textTheme.titleMedium,
-                overlayColor: MaterialStateProperty.all(Colors.transparent),
-                splashFactory: NoSplash.splashFactory,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                onTap: (index) {
-                  final category = categories[index];
-                  print('Tab clicked: $category at index $index');
-                  
-                  // Add a small delay to ensure the tab animation completes
-                  Future.delayed(const Duration(milliseconds: 100), () {
-                    _scrollToCategory(category);
-                  });
-                },
-                tabs: categories.map((category) => Tab(text: category)).toList(),
+                // Refresh button
+                IconButton(
+                  onPressed: () {
+                    ref.read(refreshNearestStoreProvider.notifier).state++;
+                  },
+                  icon: Icon(
+                    Icons.refresh,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  ),
+                  tooltip: 'Refresh nearest store',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                ),
+              ],
+            );
+          } else {
+            return Row(
+              children: [
+                Icon(
+                  Icons.location_searching,
+                  size: 14,
+                  color: const Color(0xFF999999),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'No delivery available in your area yet',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF999999),
+                    ),
+                  ),
+                ),
+                // Refresh button
+                IconButton(
+                  onPressed: () {
+                    ref.read(refreshNearestStoreProvider.notifier).state++;
+                  },
+                  icon: Icon(
+                    Icons.refresh,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  ),
+                  tooltip: 'Refresh nearest store',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                ),
+              ],
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildSearchBar(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(12),
+          border: _isSearching ? Border.all(
+            color: theme.colorScheme.primary,
+            width: 2,
+          ) : null,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search,
+              color: _isSearching ? theme.colorScheme.primary : theme.textSecondary,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search menu items...',
+                  border: InputBorder.none,
+                  hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.textSecondary,
+                  ),
+                ),
+                style: theme.textTheme.bodyMedium,
               ),
             ),
-
-          // Menu Content
-          Expanded(
-            child: _buildMenuContent(),
-          ),
-        ],
+            if (_isSearching)
+              IconButton(
+                onPressed: () {
+                  _searchController.clear();
+                },
+                icon: Icon(
+                  Icons.clear,
+                  size: 20,
+                  color: theme.textSecondary,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+          ],
+        ),
       ),
-      floatingActionButton: Consumer(
-        builder: (context, ref, child) {
-          final cartItemCount = ref.watch(cartItemCountProvider);
+    );
+  }
 
-          return FloatingActionButton.extended(
-            onPressed: () {
-              context.go('/cart');
-            },
-            backgroundColor: theme.colorScheme.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.shopping_cart_outlined),
-                if (cartItemCount > 0)
-                  Positioned(
-                    right: -6,
-                    top: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(10),
+  Widget _buildCategoryTabs(ThemeData theme) {
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        labelColor: theme.colorScheme.primary,
+        unselectedLabelColor: theme.textSecondary,
+        indicatorColor: theme.colorScheme.primary,
+        indicatorWeight: 2,
+        labelStyle: theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: theme.textTheme.titleMedium,
+        overlayColor: MaterialStateProperty.all(Colors.transparent),
+        splashFactory: NoSplash.splashFactory,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        onTap: (index) {
+          final category = categories[index];
+          print('Tab clicked: $category at index $index');
+          
+          // Add a small delay to ensure the tab animation completes
+          Future.delayed(const Duration(milliseconds: 100), () {
+            _scrollToCategory(category);
+          });
+        },
+        tabs: categories.map((category) => Tab(text: category)).toList(),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedBottomSheet(ThemeData theme) {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 1),
+          end: const Offset(0, 0),
+        ).animate(_bottomSheetAnimation),
+        child: Consumer(
+          builder: (context, ref, child) {
+            final nearestStoreAsync = ref.watch(nearestStoreWithRefreshProvider);
+            final cartItemCount = ref.watch(cartItemCountProvider);
+
+            return nearestStoreAsync.when(
+              loading: () => const SizedBox.shrink(),
+              error: (error, stack) => const SizedBox.shrink(),
+              data: (storeData) {
+                final store = storeData.store;
+                final isStoreOpen = store?.isCurrentlyOpen ?? true;
+                final isClosed = store?.isClosed ?? false;
+
+                return Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 20,
+                        offset: const Offset(0, -5),
                       ),
-                      constraints: const BoxConstraints(
-                        minWidth: 16,
-                        minHeight: 16,
-                      ),
-                      child: Text(
-                        cartItemCount > 99 ? '99+' : cartItemCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
+                    ],
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Handle bar
+                          Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[300],
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Store info and cart section
+                          Row(
+                            children: [
+                              // Store info
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (store != null) ...[
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: (isClosed || !isStoreOpen) 
+                                                  ? Colors.red[50]
+                                                  : Colors.green[50],
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Icon(
+                                              (isClosed || !isStoreOpen) 
+                                                  ? Icons.store_mall_directory_outlined
+                                                  : Icons.store,
+                                              size: 16,
+                                              color: (isClosed || !isStoreOpen) 
+                                                  ? Colors.red[600]
+                                                  : Colors.green[600],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              store.name,
+                                              style: theme.textTheme.titleMedium?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ] else ...[
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[100],
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Icon(
+                                              Icons.location_searching,
+                                              size: 16,
+                                              color: Colors.grey[600],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              'No stores available',
+                                              style: theme.textTheme.titleMedium?.copyWith(
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(width: 16),
+
+                              // Cart button - only show when store is open
+                              if (store != null && !isClosed && isStoreOpen) ...[
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.primary,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(12),
+                                      onTap: () {
+                                        // Navigate to cart using go_router
+                                        context.go('/cart');
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 20,
+                                          vertical: 12,
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Stack(
+                                              clipBehavior: Clip.none,
+                                              children: [
+                                                Icon(
+                                                  Icons.shopping_cart_outlined,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                                if (cartItemCount > 0)
+                                                  Positioned(
+                                                    right: -8,
+                                                    top: -8,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.all(2),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red,
+                                                        borderRadius: BorderRadius.circular(8),
+                                                      ),
+                                                      constraints: const BoxConstraints(
+                                                        minWidth: 16,
+                                                        minHeight: 16,
+                                                      ),
+                                                      child: Text(
+                                                        cartItemCount > 99 ? '99+' : cartItemCount.toString(),
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 10,
+                                                          fontWeight: FontWeight.bold,
+                                                        ),
+                                                        textAlign: TextAlign.center,
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              cartItemCount > 0 
+                                                  ? 'Cart ($cartItemCount)'
+                                                  : 'Cart',
+                                              style: theme.textTheme.labelLarge?.copyWith(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+
+                          // Show store hours when closed
+                          if (store != null && (isClosed || !isStoreOpen)) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey[200]!),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.access_time,
+                                        size: 16,
+                                        color: Colors.grey[700],
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Store Hours',
+                                        style: theme.textTheme.titleSmall?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    store.getFormattedHours(),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: Colors.grey[600],
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
-              ],
-            ),
-            label: Text(
-              'Cart${cartItemCount > 0 ? ' ($cartItemCount)' : ''}',
-              style: theme.textTheme.labelLarge?.copyWith(color: Colors.white),
-            ),
-          );
-        },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -680,95 +962,112 @@ class _MenuPageState extends ConsumerState<MenuPage>
 
             return SingleChildScrollView(
               controller: _scrollController,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Best Seller Section (first 4 products from all categories)
-                  if (products.isNotEmpty) ...[
-                    Padding(
-                      key: _bestSellerKey,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Column(
+              child: nearestStoreAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, stack) => Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Error loading store: $error'),
+                      ElevatedButton(
+                        onPressed: () {
+                          ref.read(refreshNearestStoreProvider.notifier).state++;
+                        },
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+                data: (storeData) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Best Seller Section (first 4 products from all categories)
+                    if (products.isNotEmpty) ...[
+                      Padding(
+                        key: _bestSellerKey,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Best Seller',
+                              style: theme.textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 12),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                                childAspectRatio: 0.85,
+                              ),
+                              itemCount:
+                                  products.length > 4 ? 4 : products.length,
+                              itemBuilder: (context, index) =>
+                                  _buildBestSellerItem(products[index], index, storeData),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                    ],
+
+                    // Category Sections - Display in same order as tabs
+                    ...categories
+                        .where((category) => category != 'All')
+                        .map((categoryName) {
+                      final categoryProducts =
+                          productsByCategory[categoryName] ?? [];
+
+                      if (categoryProducts.isEmpty)
+                        return const SizedBox.shrink();
+
+                      return Column(
+                        key: categoryKeys[categoryName],
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Best Seller',
-                            style: theme.textTheme.titleLarge,
+                          // Category Header
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Text(
+                              categoryName,
+                              style: theme.textTheme.titleLarge,
+                            ),
                           ),
                           const SizedBox(height: 12),
-                          GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 12,
-                              mainAxisSpacing: 12,
-                              childAspectRatio: 0.85,
+
+                          // Category Products
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: categoryProducts.length,
+                              separatorBuilder: (context, index) => Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: theme.borderColor,
+                                indent:
+                                    84, // Align with text content (68px image + 16px gap)
+                                endIndent: 0,
+                              ),
+                              itemBuilder: (context, index) =>
+                                  _buildProductListItem(
+                                      categoryProducts[index], index, storeData),
                             ),
-                            itemCount:
-                                products.length > 4 ? 4 : products.length,
-                            itemBuilder: (context, index) =>
-                                _buildBestSellerItem(products[index], index),
                           ),
+                          const SizedBox(height: 24),
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 32),
+                      );
+                    }).toList(),
+
+                    const SizedBox(
+                        height: 100), // Space for floating action button
                   ],
-
-                  // Category Sections - Display in same order as tabs
-                  ...categories
-                      .where((category) => category != 'All')
-                      .map((categoryName) {
-                    final categoryProducts =
-                        productsByCategory[categoryName] ?? [];
-
-                    if (categoryProducts.isEmpty)
-                      return const SizedBox.shrink();
-
-                    return Column(
-                      key: categoryKeys[categoryName],
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Category Header
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Text(
-                            categoryName,
-                            style: theme.textTheme.titleLarge,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Category Products
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: categoryProducts.length,
-                            separatorBuilder: (context, index) => Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: theme.borderColor,
-                              indent:
-                                  84, // Align with text content (68px image + 16px gap)
-                              endIndent: 0,
-                            ),
-                            itemBuilder: (context, index) =>
-                                _buildProductListItem(
-                                    categoryProducts[index], index),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
-                    );
-                  }).toList(),
-
-                  const SizedBox(
-                      height: 100), // Space for floating action button
-                ],
+                ),
               ),
             );
           },
@@ -779,6 +1078,7 @@ class _MenuPageState extends ConsumerState<MenuPage>
 
   Widget _buildSearchResults(List<Map<String, dynamic>> allProducts) {
     final theme = Theme.of(context);
+    final nearestStoreAsync = ref.watch(nearestStoreWithRefreshProvider);
     
     // Filter products based on search query
     final filteredProducts = allProducts.where((product) {
@@ -874,18 +1174,19 @@ class _MenuPageState extends ConsumerState<MenuPage>
               ),
               itemBuilder: (context, index) => _buildSearchResultItem(
                 filteredProducts[index], 
-                index
+                index,
+                nearestStoreAsync,
               ),
             ),
           ),
           
-          const SizedBox(height: 100), // Space for floating action button
+          const SizedBox(height: 120), // Space for bottom sheet
         ],
       ),
     );
   }
 
-  Widget _buildSearchResultItem(Map<String, dynamic> product, int index) {
+  Widget _buildSearchResultItem(Map<String, dynamic> product, int index, AsyncValue<({Store? store, bool usedCurrentLocation})> nearestStoreAsync) {
     final theme = Theme.of(context);
 
     // Handle both grouped and individual product structures
@@ -917,13 +1218,6 @@ class _MenuPageState extends ConsumerState<MenuPage>
     }
 
     final String categoryName = category?['main'] ?? 'Uncategorized';
-
-    // Highlight matching text
-    String getHighlightedText(String text) {
-      if (_searchQuery.isEmpty) return text;
-      final RegExp regex = RegExp(_searchQuery, caseSensitive: false);
-      return text.replaceAllMapped(regex, (match) => '**${match.group(0)}**');
-    }
 
     return AnimatedContainer(
       duration: Duration(milliseconds: 300 + (index * 50)),
@@ -1083,7 +1377,7 @@ class _MenuPageState extends ConsumerState<MenuPage>
     return spans;
   }
 
-  Widget _buildBestSellerItem(Map<String, dynamic> product, int index) {
+  Widget _buildBestSellerItem(Map<String, dynamic> product, int index, ({Store? store, bool usedCurrentLocation}) storeData) {
     final theme = Theme.of(context);
 
     // Handle both grouped and individual product structures
@@ -1194,7 +1488,7 @@ class _MenuPageState extends ConsumerState<MenuPage>
     );
   }
 
-  Widget _buildProductListItem(Map<String, dynamic> product, int index) {
+  Widget _buildProductListItem(Map<String, dynamic> product, int index, ({Store? store, bool usedCurrentLocation}) storeData) {
     final theme = Theme.of(context);
 
     // Handle both grouped and individual product structures
@@ -1312,31 +1606,41 @@ class _MenuPageState extends ConsumerState<MenuPage>
               ),
             ),
 
-            // Add to Cart Button
-            Container(
-              height: 36,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primary,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
+            // Add to Cart Button - Hide when store is closed
+            () {
+              final store = storeData.store;
+              final isStoreOpen = store?.isCurrentlyOpen ?? true;
+              final isClosed = store?.isClosed ?? false;
+              
+              if (isClosed || !isStoreOpen) {
+                return const SizedBox.shrink(); // Hide button completely when closed
+              }
+              
+              return Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary,
                   borderRadius: BorderRadius.circular(8),
-                  onTap: () => _openItemCustomization(product),
-                  child: Center(
-                    child: Text(
-                      'Add',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _openItemCustomization(product),
+                    child: Center(
+                      child: Text(
+                        'Add',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            }(),
           ],
         ),
       ),

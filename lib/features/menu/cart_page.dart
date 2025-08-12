@@ -1165,6 +1165,10 @@ class _CartPageState extends ConsumerState<CartPage> {
               }
 
               print('Error during checkout: $e');
+              if (e == 'Store is currently closed') {
+                _showValidationError(context, 'Store is currently closed');
+                return;
+              }
               _showValidationError(context,
                   'Failed to ${pendingOrder != null ? 'update' : 'create'} order: $e');
             }
