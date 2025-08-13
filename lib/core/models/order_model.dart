@@ -240,6 +240,7 @@ class Order {
   final String orderComment;
   final OrderDeliveryInfo deliveryInfo;
   final List<PaymentMethod> paymentMethod;
+  final OrderDiscount? discount;
 
   const Order({
     required this.storeId,
@@ -248,6 +249,7 @@ class Order {
     required this.orderComment,
     required this.deliveryInfo,
     required this.paymentMethod,
+    this.discount,
   });
 
   Map<String, dynamic> toJson() {
@@ -258,6 +260,7 @@ class Order {
       'orderComment': orderComment,
       'deliveryInfo': deliveryInfo.toJson(),
       'paymentMethod': paymentMethod.map((pm) => pm.toJson()).toList(),
+      if (discount != null) 'discount': discount!.toJson(),
     };
   }
 }

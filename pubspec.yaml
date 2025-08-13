@@ -80,6 +80,7 @@ dependencies:
   
   # QR Code
   qr_flutter: ^4.1.0
+  equatable: ^2.0.7
 
 dev_dependencies:
   flutter_test:

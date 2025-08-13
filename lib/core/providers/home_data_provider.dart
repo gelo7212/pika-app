@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/home_data_model.dart';
 import '../services/home_data_service.dart';
+import 'discount_provider.dart';
 // import '../di/service_locator.dart'; // Will be used when service locator integration is needed
 
 // Provider for home data service
@@ -34,11 +35,15 @@ final featuredItemsProvider = Provider<List<FeaturedItem>>((ref) {
 });
 
 final specialOffersProvider = Provider<List<SpecialOffer>>((ref) {
-  final homeDataAsync = ref.watch(homePageDataProvider);
-  return homeDataAsync.when(
-    data: (data) => data.specialOffers,
+  final discountsAsync = ref.watch(discountsProvider);
+  return discountsAsync.when(
+    data: (discounts) => discounts
+        .where((discount) => discount.isActive) // Only show active discounts
+        .take(3) // Limit to 3 special offers
+        .map((discount) => SpecialOffer.fromDiscount(discount))
+        .toList(),
     loading: () => [],
-    error: (_, __) => [],
+    error: (_, __) => [], // Fall back to empty list on error
   );
 });
 

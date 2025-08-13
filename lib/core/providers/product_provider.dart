@@ -98,6 +98,12 @@ final menuProductsProvider = FutureProvider.family<List<Map<String, dynamic>>, S
   }
 });
 
+// Provider for display products (public, no authentication required)
+final displayProductsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final productService = ref.read(productServiceProvider);
+  return await productService.getProductsForDisplay();
+});
+
 // Provider for getting a single product by ID
 final productByIdProvider = FutureProvider.family<Map<String, dynamic>?, String>((ref, productId) async {
   final productService = ref.read(productServiceProvider);

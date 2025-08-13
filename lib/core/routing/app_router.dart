@@ -26,7 +26,7 @@ import '../interfaces/auth_interface.dart';
 // Auth guard for protected routes
 Future<bool> _requiresAuth(String location) async {
   // Routes that don't require authentication
-  final publicRoutes = ['/', '/login'];
+  final publicRoutes = ['/', '/login', '/home'];
   
   if (publicRoutes.contains(location)) {
     return false;

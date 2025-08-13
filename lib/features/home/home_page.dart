@@ -5,7 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../../core/providers/auth_provider.dart';
 import '../../core/providers/store_provider.dart';
 import '../../core/providers/home_data_provider.dart';
+import '../../core/providers/product_provider.dart';
+import '../../core/providers/discount_provider.dart';
+import '../../core/providers/temp_discount_provider.dart';
+import '../../core/models/home_data_model.dart';
+import '../../core/models/discount_model.dart';
 import '../../shared/widgets/home_order_timeline_widget.dart';
+import '../../shared/widgets/address_prompt_banner.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -149,11 +155,11 @@ class HomePage extends ConsumerWidget {
           child: CircularProgressIndicator(),
         ),
       ),
-      error: (error, stack) => _buildUnauthenticatedHome(context),
+      error: (error, stack) => _buildUnauthenticatedHome(context, ref),
       data: (isLoggedIn) {
         return isLoggedIn
             ? _buildAuthenticatedHome(context, ref)
-            : _buildUnauthenticatedHome(context);
+            : _buildUnauthenticatedHome(context, ref);
       },
     );
   }
@@ -347,6 +353,9 @@ class HomePage extends ConsumerWidget {
 
               const SizedBox(height: 32),
 
+              // Address prompt banner - only show if no addresses
+              const AddressPromptBanner(),
+
               // AI-powered Search bar
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -470,6 +479,14 @@ class HomePage extends ConsumerWidget {
               _buildFeaturedItems(context, ref),
 
               const SizedBox(height: 32),
+              // Categories Section
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text(
+                  'Special Offers',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
 
               // Special Offers Section
               _buildSpecialOffers(context, ref),
@@ -973,7 +990,7 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildUnauthenticatedHome(BuildContext context) {
+  Widget _buildUnauthenticatedHome(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -1031,7 +1048,7 @@ class HomePage extends ConsumerWidget {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 16),
-                    _buildPreviewFeaturedItems(context),
+                    _buildPreviewFeaturedItems(context, ref),
                   ],
                 ),
               ),
@@ -1050,6 +1067,39 @@ class HomePage extends ConsumerWidget {
                     ),
                     const SizedBox(height: 16),
                     _buildPreviewMenuCategories(context),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 32),
+
+              // Full Menu List
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Our Menu',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => context.go('/menu'),
+                          child: Text(
+                            'View All',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _buildMenuList(context, ref),
                   ],
                 ),
               ),
@@ -1168,11 +1218,399 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildPreviewFeaturedItems(BuildContext context) {
+  Widget _buildMenuList(BuildContext context, WidgetRef ref) {
+    final productsAsync = ref.watch(displayProductsProvider);
+    
+    return productsAsync.when(
+      loading: () => _buildMenuListPlaceholder(context),
+      error: (error, stack) => _buildMenuListPlaceholder(context),
+      data: (products) {
+        if (products.isEmpty) {
+          return _buildMenuListPlaceholder(context);
+        }
+
+        // Group products by category
+        final Map<String, List<Map<String, dynamic>>> groupedProducts = {};
+        
+        for (final product in products) {
+          final category = product['category']?['main'] ?? 'Other';
+          if (!groupedProducts.containsKey(category)) {
+            groupedProducts[category] = [];
+          }
+          groupedProducts[category]!.add(product);
+        }
+
+        return Column(
+          children: groupedProducts.entries.map((entry) {
+            final categoryName = entry.key;
+            final categoryProducts = entry.value.take(3).toList(); // Show only 3 per category
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Category Header
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12, top: 24),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          categoryName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${entry.value.length} items',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Products in this category
+                ...categoryProducts.map((product) => _buildMenuListItem(context, product)).toList(),
+                
+                if (entry.value.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: InkWell(
+                      onTap: () => context.go('/menu?category=${categoryName.toLowerCase()}'),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'View ${entry.value.length - 3} more ${categoryName.toLowerCase()} items',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuListPlaceholder(BuildContext context) {
+    return Column(
+      children: List.generate(3, (index) => 
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Container(
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.grey.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuListItem(BuildContext context, Map<String, dynamic> product) {
+    final String productName = product['name'] ?? 'Unknown Product';
+    final List<dynamic> variants = product['variants'] ?? [];
+    
+    // Get the lowest price from variants
+    double lowestPrice = 0.0;
+    String image = '';
+    
+    if (variants.isNotEmpty) {
+      lowestPrice = variants
+          .map<double>((variant) => (variant['price'] ?? 0.0).toDouble())
+          .reduce((a, b) => a < b ? a : b);
+      
+      // Get image from first variant that has one
+      for (final variant in variants) {
+        final variantImage = variant['image'] ?? '';
+        if (variantImage.isNotEmpty) {
+          image = variantImage;
+          break;
+        }
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFFE5E5E5),
+          width: 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            // Product Image
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: Colors.grey.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: image.isNotEmpty && _isNetworkImage(image)
+                    ? Image.network(
+                        _convertGoogleDriveUrl(image),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: Colors.grey.withOpacity(0.2),
+                            child: const Center(
+                              child: Icon(
+                                Icons.restaurant_outlined,
+                                size: 20,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          );
+                        },
+                      )
+                    : Container(
+                        color: Colors.grey.withOpacity(0.2),
+                        child: const Center(
+                          child: Icon(
+                            Icons.restaurant_outlined,
+                            size: 20,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+            
+            const SizedBox(width: 12),
+            
+            // Product Details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    productName,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  if (variants.isNotEmpty)
+                    Text(
+                      '${variants.length} variant${variants.length > 1 ? 's' : ''} available',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            
+            // Price
+            if (lowestPrice > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'From ₱${lowestPrice.toStringAsFixed(0)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreviewFeaturedItems(BuildContext context, WidgetRef ref) {
+    final productsAsync = ref.watch(displayProductsProvider);
+    
+    return productsAsync.when(
+      loading: () => _buildPreviewFeaturedItemsPlaceholder(context),
+      error: (error, stack) => _buildPreviewFeaturedItemsPlaceholder(context),
+      data: (products) {
+        if (products.isEmpty) {
+          return _buildPreviewFeaturedItemsPlaceholder(context);
+        }
+
+        // Take only the first 6 products for preview
+        final previewProducts = products.take(6).toList();
+
+        return SizedBox(
+          height: 180,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: previewProducts.length,
+            itemBuilder: (context, index) {
+              final product = previewProducts[index];
+              
+              // Extract product information
+              final String productName = product['name'] ?? 'Unknown Product';
+              final List<dynamic> variants = product['variants'] ?? [];
+              
+              // Get the lowest price from variants
+              double lowestPrice = 0.0;
+              String image = '';
+
+              if (variants.isNotEmpty) {
+                // Find the lowest price among variants
+                lowestPrice = variants
+                    .map((variant) => (variant['price'] ?? 0.0).toDouble())
+                    .reduce((a, b) => a < b ? a : b);
+
+                // Find an image from variants (prefer first non-empty image)
+                for (final variant in variants) {
+                  final variantImage = variant['image']?.toString() ?? '';
+                  if (variantImage.isNotEmpty) {
+                    image = variantImage;
+                    break;
+                  }
+                }
+              } else {
+                lowestPrice = (product['price'] ?? 0.0).toDouble();
+                image = product['image']?.toString() ?? '';
+              }
+
+              return Container(
+                width: 140,
+                margin: const EdgeInsets.only(right: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFFE5E5E5),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Product Image
+                    Container(
+                      height: 90,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F5F5),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(12),
+                          topRight: Radius.circular(12),
+                        ),
+                      ),
+                      child: image.isNotEmpty && _isNetworkImage(image)
+                          ? ClipRRect(
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(12),
+                                topRight: Radius.circular(12),
+                              ),
+                              child: Image.network(
+                                _convertGoogleDriveUrl(image),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return const Center(
+                                    child: Icon(
+                                      Icons.image_not_supported,
+                                      size: 32,
+                                      color: Colors.grey,
+                                    ),
+                                  );
+                                },
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return const Center(
+                                    child: CircularProgressIndicator(),
+                                  );
+                                },
+                              ),
+                            )
+                          : const Center(
+                              child: Icon(
+                                Icons.fastfood,
+                                size: 32,
+                                color: Colors.grey,
+                              ),
+                            ),
+                    ),
+                    
+                    // Product Details
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              productName,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const Spacer(),
+                            if (lowestPrice > 0)
+                              Text(
+                                '₱${lowestPrice.toStringAsFixed(2)}',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPreviewFeaturedItemsPlaceholder(BuildContext context) {
     return SizedBox(
       height: 180,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: 3,
         itemBuilder: (context, index) {
           return Container(
@@ -1335,82 +1773,112 @@ class HomePage extends ConsumerWidget {
 
   Widget _buildSpecialOffers(BuildContext context, WidgetRef ref) {
     final specialOffers = ref.watch(specialOffersProvider);
-    specialOffers.clear();
+    final discountsAsync = ref.watch(discountsProvider);
 
-    // if (specialOffers.isEmpty) {
-    //   return _buildDefaultSpecialOffer(context);
-    // }
+    if (specialOffers.isEmpty) {
+      return _buildDefaultSpecialOffer(context);
+    }
 
-    return Column(
-      children: specialOffers
-          .map((offer) => Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .primary
-                          .withOpacity(0.1),
-                      width: 1,
+    return discountsAsync.when(
+      loading: () => Column(
+        children: specialOffers
+            .map((offer) => _buildSpecialOfferCard(context, ref, offer, null))
+            .toList(),
+      ),
+      error: (_, __) => Column(
+        children: specialOffers
+            .map((offer) => _buildSpecialOfferCard(context, ref, offer, null))
+            .toList(),
+      ),
+      data: (discounts) => Column(
+        children: specialOffers.map((offer) {
+          // Find the corresponding discount model
+          DiscountModel? discount;
+          try {
+            discount = discounts.firstWhere(
+              (d) => d.code == offer.id || d.name == offer.name,
+            );
+          } catch (e) {
+            // No matching discount found, use null
+            discount = null;
+          }
+          return _buildSpecialOfferCard(context, ref, offer, discount);
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildSpecialOfferCard(
+    BuildContext context, 
+    WidgetRef ref, 
+    SpecialOffer offer, 
+    DiscountModel? discount
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context)
+                .colorScheme
+                .primary
+                .withOpacity(0.1),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    offer.properties['value'] ?? offer.name,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    offer.details,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 36,
+                    child: ElevatedButton(
+                      onPressed: () => _handleSpecialOfferTap(context, ref, discount),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20),
+                      ),
+                      child: const Text('Order now'),
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              offer.properties['value'] ?? offer.name,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              offer.details,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              height: 36,
-                              child: ElevatedButton(
-                                onPressed: () => context.go('/menu'),
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 20),
-                                ),
-                                child: const Text('Order now'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Icon(
-                        Icons.local_offer_outlined,
-                        size: 32,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withOpacity(0.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ))
-          .toList(),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Icon(
+              Icons.local_offer_outlined,
+              size: 32,
+              color: Theme.of(context)
+                  .colorScheme
+                  .primary
+                  .withOpacity(0.3),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1667,5 +2135,25 @@ class HomePage extends ConsumerWidget {
       // Return a default color if parsing fails
       return const Color(0xFF6B73FF);
     }
+  }
+
+  // Handle special offer tap - save discount and navigate to menu
+  void _handleSpecialOfferTap(BuildContext context, WidgetRef ref, DiscountModel? discount) {
+    if (discount != null) {
+      // Save the discount temporarily
+      ref.read(tempDiscountProvider.notifier).selectDiscount(discount);
+      
+      // Show snackbar to confirm discount selection
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Discount "${discount.name}" applied! Go to cart to use it.'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+    
+    // Navigate to menu page
+    context.go('/menu');
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:location/location.dart';
 import '../../../core/models/address_model.dart';
 import '../../../core/services/maps/maps.dart';
@@ -69,7 +70,11 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
     if (widget.address != null) {
       _nameController.text = widget.address!.name;
       _addressController.text = widget.address!.address;
-      _phoneController.text = widget.address!.phone;
+      
+      // Format the existing phone number
+      final phone = widget.address!.phone;
+      _phoneController.text = _formatExistingPhoneNumber(phone);
+      
       _selectedLocation = MapLatLng(
         widget.address!.latitude,
         widget.address!.longitude,
@@ -80,6 +85,37 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
         _scheduleMarkerAddition();
       });
     }
+  }
+
+  /// Format existing phone number to match the expected format
+  String _formatExistingPhoneNumber(String phone) {
+    // Remove all non-digit characters
+    final digitsOnly = phone.replaceAll(RegExp(r'[^\d]'), '');
+    
+    if (digitsOnly.isEmpty) return '';
+    
+    // If it starts with 63, format as +63 9XX XXX XXXX
+    if (digitsOnly.startsWith('63') && digitsOnly.length >= 12) {
+      final mobileNumber = digitsOnly.substring(2, 12); // Get 10 digits after 63
+      return '+63 ${mobileNumber.substring(0, 1)}${mobileNumber.substring(1, 3)} ${mobileNumber.substring(3, 6)} ${mobileNumber.substring(6, 10)}';
+    }
+    
+    // If it starts with 9 and has 10 digits, assume it's a local mobile number
+    if (digitsOnly.startsWith('9') && digitsOnly.length >= 10) {
+      final mobileNumber = digitsOnly.substring(0, 10);
+      return '+63 ${mobileNumber.substring(0, 1)}${mobileNumber.substring(1, 3)} ${mobileNumber.substring(3, 6)} ${mobileNumber.substring(6, 10)}';
+    }
+    
+    // For other formats, try to format as best as possible
+    if (digitsOnly.length >= 10) {
+      final last10 = digitsOnly.substring(digitsOnly.length - 10);
+      if (last10.startsWith('9')) {
+        return '+63 ${last10.substring(0, 1)}${last10.substring(1, 3)} ${last10.substring(3, 6)} ${last10.substring(6, 10)}';
+      }
+    }
+    
+    // If we can't format it properly, return the original with +63 prefix if it doesn't have it
+    return digitsOnly.startsWith('63') ? '+$digitsOnly' : '+63$digitsOnly';
   }
 
   void _scheduleMarkerAddition() {
@@ -528,14 +564,44 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
                             const SizedBox(height: 12),
                             TextFormField(
                               controller: _phoneController,
-                              decoration: const InputDecoration(
+                              keyboardType: TextInputType.phone,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                _PhilippinePhoneNumberFormatter(),
+                              ],
+                              decoration: InputDecoration(
                                 labelText: 'Phone Number',
-                                border: OutlineInputBorder(),
+                                hintText: '+63 9XX XXX XXXX',
+                                border: const OutlineInputBorder(),
+                                prefixIcon: const Icon(Icons.phone),
+                                helperText: 'Format: +63 followed by 10 digits',
+                                helperStyle: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
                               ),
                               validator: (value) {
                                 if (value == null || value.isEmpty) {
                                   return 'Please enter a phone number';
                                 }
+                                
+                                // Remove all non-digit characters for validation
+                                final digitsOnly = value.replaceAll(RegExp(r'[^\d]'), '');
+                                
+                                // Check if it starts with 63 and has 12 digits total (63 + 10 digits)
+                                if (!digitsOnly.startsWith('63')) {
+                                  return 'Phone number must start with +63';
+                                }
+                                
+                                if (digitsOnly.length != 12) {
+                                  return 'Phone number must have 10 digits after +63';
+                                }
+                                
+                                // Check if the first digit after 63 is 9 (mobile number)
+                                if (digitsOnly[2] != '9') {
+                                  return 'Mobile number must start with 9 after +63';
+                                }
+                                
                                 return null;
                               },
                             ),
@@ -574,10 +640,13 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
 
   void _saveAddress() {
     if (_formKey.currentState!.validate() && _selectedLocation != null) {
+      // Clean the phone number (remove formatting) before saving
+      final cleanedPhone = _phoneController.text.replaceAll(RegExp(r'[^\d]'), '');
+      
       widget.onSave(
         _nameController.text,
         _addressController.text,
-        _phoneController.text,
+        '+$cleanedPhone', // Save with + prefix for international format
         _selectedLocation!.latitude,
         _selectedLocation!.longitude,
       );
@@ -591,5 +660,100 @@ class _AddAddressDialogNewState extends State<AddAddressDialogNew> {
     _addressController.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+}
+
+/// Custom text input formatter for Philippine phone numbers
+/// Formats input as +63 9XX XXX XXXX
+class _PhilippinePhoneNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Get only digits from the new value
+    final digitsOnly = newValue.text.replaceAll(RegExp(r'[^\d]'), '');
+    
+    // If empty, return empty
+    if (digitsOnly.isEmpty) {
+      return const TextEditingValue(
+        text: '',
+        selection: TextSelection.collapsed(offset: 0),
+      );
+    }
+    
+    String formatted = '';
+    int selectionIndex = newValue.selection.end;
+    
+    // Always start with +63
+    if (digitsOnly.startsWith('63')) {
+      // Input already has 63, use it
+      formatted = '+63';
+      final remainingDigits = digitsOnly.substring(2);
+      
+      // Format the remaining digits (up to 10 digits for mobile)
+      if (remainingDigits.isNotEmpty) {
+        formatted += ' ';
+        if (remainingDigits.length >= 1) {
+          formatted += remainingDigits.substring(0, 1);
+        }
+        if (remainingDigits.length >= 2) {
+          formatted += remainingDigits.substring(1, remainingDigits.length >= 3 ? 3 : remainingDigits.length);
+        }
+        if (remainingDigits.length >= 4) {
+          formatted += ' ${remainingDigits.substring(3, remainingDigits.length >= 6 ? 6 : remainingDigits.length)}';
+        }
+        if (remainingDigits.length >= 7) {
+          formatted += ' ${remainingDigits.substring(6, remainingDigits.length >= 10 ? 10 : remainingDigits.length)}';
+        }
+      }
+    } else {
+      // Input doesn't start with 63, assume user is entering local number starting with 9
+      formatted = '+63';
+      if (digitsOnly.isNotEmpty) {
+        formatted += ' ';
+        // Take up to 10 digits for the mobile number
+        final mobileDigits = digitsOnly.substring(0, digitsOnly.length >= 10 ? 10 : digitsOnly.length);
+        
+        if (mobileDigits.length >= 1) {
+          formatted += mobileDigits.substring(0, 1);
+        }
+        if (mobileDigits.length >= 2) {
+          formatted += mobileDigits.substring(1, mobileDigits.length >= 3 ? 3 : mobileDigits.length);
+        }
+        if (mobileDigits.length >= 4) {
+          formatted += ' ${mobileDigits.substring(3, mobileDigits.length >= 6 ? 6 : mobileDigits.length)}';
+        }
+        if (mobileDigits.length >= 7) {
+          formatted += ' ${mobileDigits.substring(6, mobileDigits.length >= 10 ? 10 : mobileDigits.length)}';
+        }
+      }
+    }
+    
+    // Limit the total length (should not exceed +63 9XX XXX XXXX = 17 characters)
+    if (formatted.length > 17) {
+      formatted = formatted.substring(0, 17);
+    }
+    
+    // Calculate new cursor position
+    int newSelectionIndex = formatted.length;
+    if (selectionIndex <= newValue.text.length) {
+      // Try to maintain relative cursor position
+      final oldDigitsCount = oldValue.text.replaceAll(RegExp(r'[^\d]'), '').length;
+      final newDigitsCount = digitsOnly.length;
+      
+      if (newDigitsCount > oldDigitsCount) {
+        // Digits were added, place cursor at end
+        newSelectionIndex = formatted.length;
+      } else if (newDigitsCount < oldDigitsCount) {
+        // Digits were removed, adjust cursor position
+        newSelectionIndex = formatted.length;
+      }
+    }
+    
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: newSelectionIndex),
+    );
   }
 }

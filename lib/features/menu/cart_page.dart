@@ -7,15 +7,19 @@ import '../../core/providers/address_provider.dart';
 import '../../core/providers/store_provider.dart';
 import '../../core/providers/order_provider.dart';
 import '../../core/providers/user_profile_provider.dart';
+import '../../core/providers/discount_provider.dart';
+import '../../core/providers/temp_discount_provider.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/delivery_model.dart';
 import '../../core/models/address_model.dart';
 import '../../core/models/addon_model.dart';
+import '../../core/models/discount_model.dart';
 import '../../core/services/order_service.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/routing/navigation_extensions.dart';
 import '../../shared/components/custom_app_bar.dart';
+import '../../shared/widgets/set_default_address_banner.dart';
 import '../../features/address/pages/address_management_page.dart';
 import 'product_customization_page.dart';
 import 'widgets/delivery_details_section.dart';
@@ -202,6 +206,111 @@ class _CartPageState extends ConsumerState<CartPage> {
                     },
                   ),
 
+                  // Address Required/Set Default Address Banner
+                  const SetDefaultAddressBanner(),
+                  
+                  // Address Required Banner for users with no addresses
+                  Consumer(
+                    builder: (context, ref, child) {
+                      final addressesAsync = ref.watch(addressNotifierProvider);
+                      
+                      return addressesAsync.when(
+                        loading: () => const SizedBox.shrink(),
+                        error: (error, stack) => const SizedBox.shrink(),
+                        data: (addresses) {
+                          // Only show if no addresses exist
+                          if (addresses.isNotEmpty) return const SizedBox.shrink();
+                          
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.red.withOpacity(0.2),
+                                width: 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.04),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _navigateToAddressPage(context, ref),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withOpacity(0.1),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.location_off,
+                                          color: Colors.red.shade700,
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Delivery address required',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium
+                                                  ?.copyWith(
+                                                    color: const Color(0xFF1A1A1A),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Add a delivery address to complete your order. Required for checkout.',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    color: const Color(0xFF757575),
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Icon(
+                                          Icons.arrow_forward_ios,
+                                          color: Colors.red.shade700,
+                                          size: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+
                   // Delivery Details Section
                   const DeliveryDetailsSection(),
                 ],
@@ -258,6 +367,20 @@ class _CartPageState extends ConsumerState<CartPage> {
   Widget _buildCartSummary(
       BuildContext context, ThemeData theme, CartState cartState, WidgetRef ref,
       [OrderResponse? pendingOrder]) {
+    final tempDiscountState = ref.watch(tempDiscountProvider);
+    final selectedDiscount = tempDiscountState.selectedDiscount;
+    
+    // Calculate discount amount
+    double discountAmount = 0.0;
+    if (selectedDiscount != null) {
+      final tempDiscountNotifier = ref.read(tempDiscountProvider.notifier);
+      if (tempDiscountNotifier.isDiscountApplicable(cartState.totalPrice, null)) {
+        discountAmount = tempDiscountNotifier.calculateDiscountAmount(cartState.totalPrice);
+      }
+    }
+    
+    final finalTotal = cartState.totalPrice - discountAmount;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -277,25 +400,17 @@ class _CartPageState extends ConsumerState<CartPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Total Summary
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total (${cartState.totalItems} items)',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  '₱${cartState.totalPrice.toStringAsFixed(2)}',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-              ],
-            ),
+            // Discount Section
+            if (selectedDiscount != null) ...[
+              _buildDiscountSection(context, theme, ref, selectedDiscount, cartState.totalPrice, discountAmount),
+              const SizedBox(height: 16),
+            ] else ...[
+              _buildDiscountSelector(context, theme, ref, cartState.totalPrice),
+              const SizedBox(height: 16),
+            ],
+
+            // Price breakdown
+            _buildPriceBreakdown(context, theme, cartState, discountAmount, finalTotal),
 
             const SizedBox(height: 16),
 
@@ -1177,11 +1292,192 @@ class _CartPageState extends ConsumerState<CartPage> {
       },
     );
   }
+
+  // Build discount selector when no discount is applied
+  Widget _buildDiscountSelector(BuildContext context, ThemeData theme, WidgetRef ref, double orderTotal) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: OutlinedButton.icon(
+        onPressed: () => _showDiscountSelectionModal(context, ref, orderTotal),
+        icon: const Icon(Icons.local_offer_outlined),
+        label: const Text('Apply Discount'),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: theme.colorScheme.primary),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  // Build discount section when discount is applied
+  Widget _buildDiscountSection(BuildContext context, ThemeData theme, WidgetRef ref, 
+      DiscountModel discount, double orderTotal, double discountAmount) {
+    final tempDiscountNotifier = ref.read(tempDiscountProvider.notifier);
+    final validationMessage = tempDiscountNotifier.getDiscountValidationMessage(orderTotal);
+    final isValid = validationMessage == null;
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isValid ? Colors.green[50] : Colors.red[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isValid ? Colors.green[200]! : Colors.red[200]!,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                isValid ? Icons.local_offer : Icons.error_outline,
+                color: isValid ? Colors.green[600] : Colors.red[600],
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  discount.name,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: isValid ? Colors.green[700] : Colors.red[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (isValid)
+                Text(
+                  '-₱${discountAmount.toStringAsFixed(2)}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.green[700],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              IconButton(
+                onPressed: () => ref.read(tempDiscountProvider.notifier).clearDiscount(),
+                icon: const Icon(Icons.close),
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          if (!isValid) ...[
+            const SizedBox(height: 4),
+            Text(
+              validationMessage,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: Colors.red[600],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Build price breakdown
+  Widget _buildPriceBreakdown(BuildContext context, ThemeData theme, CartState cartState, 
+      double discountAmount, double finalTotal) {
+    return Column(
+      children: [
+        // Subtotal
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Subtotal (${cartState.totalItems} items)',
+              style: theme.textTheme.bodyMedium,
+            ),
+            Text(
+              '₱${cartState.totalPrice.toStringAsFixed(2)}',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+        
+        // Discount (if applied)
+        if (discountAmount > 0) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Discount',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.green[600],
+                ),
+              ),
+              Text(
+                '-₱${discountAmount.toStringAsFixed(2)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.green[600],
+                ),
+              ),
+            ],
+          ),
+        ],
+        
+        const Divider(height: 16),
+        
+        // Total
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Total',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              '₱${finalTotal.toStringAsFixed(2)}',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // Show discount selection modal
+  void _showDiscountSelectionModal(BuildContext context, WidgetRef ref, double orderTotal) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _DiscountSelectionModal(orderTotal: orderTotal),
+    );
+  }
 }
 
 Order _createOrder(BuildContext context, WidgetRef ref,
     DeliveryDetails deliveryDetails, Address address, String storeId) {
   final cartState = ref.read(cartProvider);
+
+  // Get selected discount from temp discount provider
+  final tempDiscountState = ref.read(tempDiscountProvider);
+  final selectedDiscount = tempDiscountState.selectedDiscount;
+  
+  OrderDiscount? orderDiscount;
+  if (selectedDiscount != null) {
+    final tempDiscountNotifier = ref.read(tempDiscountProvider.notifier);
+    if (tempDiscountNotifier.isDiscountApplicable(cartState.totalPrice, null)) {
+      orderDiscount = OrderDiscount(
+        type: selectedDiscount.type.name, // 'percentage' or 'fixed'
+        value: selectedDiscount.value,
+        id: selectedDiscount.id,
+        name: selectedDiscount.name,
+      );
+    }
+  }
 
   // Determine customer name with priority: deliveryDetails.customerName -> userProfile -> 'Guest Customer'
   String customerName = '';
@@ -1216,6 +1512,7 @@ Order _createOrder(BuildContext context, WidgetRef ref,
     deliveryInfo: OrderDeliveryInfo.fromDeliveryDetailsAndAddress(
         deliveryDetails, address),
     paymentMethod: [], // Default payment method
+    discount: orderDiscount,
   );
 }
 
@@ -1233,21 +1530,71 @@ void _showAddressRequiredDialog(BuildContext context, WidgetRef ref) {
   showDialog(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Address Required'),
-      content: const Text(
-        'Please add a delivery address to continue with your order.',
+      title: Row(
+        children: [
+          Icon(
+            Icons.location_on,
+            color: Theme.of(context).colorScheme.primary,
+            size: 24,
+          ),
+          const SizedBox(width: 8),
+          const Text('Delivery Address Required'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'To complete your order, please add a delivery address.',
+            style: TextStyle(fontSize: 16),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Colors.orange.shade200,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info,
+                  color: Colors.orange.shade700,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Your address will be saved for future orders and set as default.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       actions: [
         TextButton(
           onPressed: () => context.safeGoBack(),
-          child: const Text('Cancel'),
+          child: const Text('Maybe Later'),
         ),
-        ElevatedButton(
+        ElevatedButton.icon(
           onPressed: () {
             context.safeGoBack();
             _navigateToAddressPage(context, ref);
           },
-          child: const Text('Add Address'),
+          icon: const Icon(Icons.add_location),
+          label: const Text('Add Address Now'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Colors.white,
+          ),
         ),
       ],
     ),
@@ -1489,5 +1836,243 @@ class _CartItemCard extends StatelessWidget {
         addons.map((addon) => '${addon.qty}x ${addon.name}').toList();
 
     return 'Add-ons: ${addonTexts.join(', ')}';
+  }
+}
+
+// Discount selection modal widget
+class _DiscountSelectionModal extends ConsumerWidget {
+  final double orderTotal;
+
+  const _DiscountSelectionModal({required this.orderTotal});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final discountsAsync = ref.watch(discountsProvider);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Icon(
+                Icons.local_offer_outlined,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Select Discount',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Discounts list
+          discountsAsync.when(
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+            error: (error, stack) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  'Failed to load discounts',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.red[600],
+                  ),
+                ),
+              ),
+            ),
+            data: (discounts) {
+              final activeDiscounts = discounts.where((d) => d.isActive).toList();
+              
+              if (activeDiscounts.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'No discounts available',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                  ),
+                );
+              }
+              
+              return ListView.separated(
+                shrinkWrap: true,
+                itemCount: activeDiscounts.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final discount = activeDiscounts[index];
+                  
+                  // Check discount applicability directly
+                  bool isApplicable = discount.isActive;
+                  double discountAmount = 0.0;
+                  String? validationMessage;
+                  
+                  // Check date validity
+                  final now = DateTime.now();
+                  if (discount.startDate != null && now.isBefore(discount.startDate!)) {
+                    isApplicable = false;
+                    validationMessage = 'This discount is not yet available';
+                  } else if (discount.endDate != null && now.isAfter(discount.endDate!)) {
+                    isApplicable = false;
+                    validationMessage = 'This discount has expired';
+                  }
+                  
+                  // Check minimum purchase amount
+                  if (isApplicable && discount.minPurchaseAmount != null && 
+                      orderTotal < discount.minPurchaseAmount!) {
+                    isApplicable = false;
+                    validationMessage = 'Minimum purchase of ₱${discount.minPurchaseAmount!.toStringAsFixed(2)} required';
+                  }
+                  
+                  // Calculate discount amount if applicable
+                  if (isApplicable) {
+                    switch (discount.type) {
+                      case DiscountType.percentage:
+                        discountAmount = orderTotal * (discount.value / 100);
+                        break;
+                      case DiscountType.fixed:
+                        discountAmount = discount.value;
+                        break;
+                    }
+                  }
+                  
+                  return _DiscountItem(
+                    discount: discount,
+                    orderTotal: orderTotal,
+                    isApplicable: isApplicable,
+                    discountAmount: discountAmount,
+                    validationMessage: validationMessage,
+                    onTap: () {
+                      if (isApplicable) {
+                        ref.read(tempDiscountProvider.notifier).selectDiscount(discount);
+                        Navigator.of(context).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Discount "${discount.name}" applied!'),
+                            backgroundColor: Colors.green,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  );
+                },
+              );
+            },
+          ),
+          
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+}
+
+// Individual discount item widget
+class _DiscountItem extends StatelessWidget {
+  final DiscountModel discount;
+  final double orderTotal;
+  final bool isApplicable;
+  final double discountAmount;
+  final String? validationMessage;
+  final VoidCallback onTap;
+
+  const _DiscountItem({
+    required this.discount,
+    required this.orderTotal,
+    required this.isApplicable,
+    required this.discountAmount,
+    this.validationMessage,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    return GestureDetector(
+      onTap: isApplicable ? onTap : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isApplicable ? Colors.white : Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isApplicable ? theme.colorScheme.primary.withOpacity(0.3) : Colors.grey[300]!,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    discount.name,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: isApplicable ? null : Colors.grey[600],
+                    ),
+                  ),
+                ),
+                if (isApplicable)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green[100],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '-₱${discountAmount.toStringAsFixed(2)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.green[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            if (discount.description != null)
+              Text(
+                discount.description!,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: isApplicable ? Colors.grey[600] : Colors.grey[500],
+                ),
+              ),
+            if (!isApplicable && validationMessage != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                validationMessage!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.red[600],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

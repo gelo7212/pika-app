@@ -7,6 +7,7 @@ import '../interfaces/http_client_interface.dart';
 import '../interfaces/product_service_interface.dart';
 import '../interfaces/addon_interface.dart';
 import '../interfaces/websocket_service_interface.dart';
+import '../interfaces/discount_interface.dart';
 import '../services/auth_service.dart';
 import '../services/secure_storage.dart';
 import '../services/token_service.dart';
@@ -18,6 +19,8 @@ import '../services/addon_service.dart';
 import '../services/order_service.dart';
 import '../services/delivery_service.dart';
 import '../services/socket_io_service.dart';
+import '../services/discount_service.dart';
+import '../config/api_config.dart';
 import '../../environment.dart';
 
 final serviceLocator = GetIt.instance;
@@ -99,6 +102,14 @@ Future<void> setupServiceLocator() async {
   // Delivery Service
   serviceLocator.registerLazySingleton<DeliveryService>(
     () => DeliveryService(),
+  );
+
+  // Discount Service
+  serviceLocator.registerLazySingleton<DiscountServiceInterface>(
+    () => DiscountService(
+      client: serviceLocator<HttpClientInterface>(),
+      baseUrl: ApiConfig.inventoryUrl,
+    ),
   );
 
   // WebSocket Service
